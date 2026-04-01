@@ -1,0 +1,243 @@
+/*
+ * motor_controller.c
+ *
+ *  Created on: 2026-01-19
+ *      Author: hhttiuui
+ *
+ *  电机速度环控制（5ms）：
+ *  - 读取编码器速度（counts/5ms）
+ *  - EMA 滤波
+ *  - 运行简易 PID（本地实现）
+ *  - 算是small_driver_uart_control.c的一个封装
+ */
+
+#include "zf_common_headfile.h"
+#include "motor_controller.h"
+#include "small_driver_uart_control.h"
+
+// pitch 角（deg），由 IMU 任务在 common_flie.c 中更新；这里用于“要倒下就加速”的策略
+extern float show_pitch_deg;
+
+
+// ============================ 简易本地 PID 结构体（独立于 common_flie） ============================
+typedef struct {
+    float kp;
+    float ki;
+    float kd;
+    float integrator;
+    float prev_error;
+    float prev_measurement;
+    float out_min;
+    float out_max;
+    float integrator_min;
+    float integrator_max;
+} motor_pid_t;
+
+static motor_pid_t g_motor_pid;
+
+// ============================ 调试/状态量 ============================
+volatile float motor_pid_out = 0.0f;
+volatile int16 motor_speed_raw_counts = 0;
+volatile float motor_speed_filtered_counts = 0.0f;
+volatile uint32 count_motor_pid = 0;
+
+// 保存上一次输出的 duty（用于斜率限幅）
+static int16 s_prev_duty = 0;
+
+// 目标速度（单位：counts per 5ms）
+static volatile int16 g_motor_target_counts = 0;
+
+// 启动控制逻辑已简化，软起动/推动启动相关类型已移除
+
+// 清除 PID 积分等状态，避免在强推时产生过冲
+static void motor_pid_reset(void)
+{
+    g_motor_pid.integrator = 0.0f;
+    g_motor_pid.prev_error = 0.0f;
+    g_motor_pid.prev_measurement = motor_speed_filtered_counts;
+}
+// 软起动/推动启动相关逻辑已移除（简化控制流程）
+
+// 速度滤波系数（EMA），范围 0..1，越大越平滑
+#ifndef MOTOR_SPEED_ALPHA
+#define MOTOR_SPEED_ALPHA  (0.6f)
+#endif
+
+// PID 计算周期（秒）：与主循环的 5ms 触发一致
+#ifndef MOTOR_PID_DT_S
+#define MOTOR_PID_DT_S (0.005f)
+#endif
+
+// 占空比斜率限制参数（单位：百分比/秒），可由外部通过 setter 修改
+static float g_duty_slope_percent_per_s = 300.0f;
+
+// 外部接口：设置/获取占空比斜率限制
+void motor_set_duty_slope_limit_percent_per_s(float percent_per_s)
+{
+    g_duty_slope_percent_per_s = percent_per_s;
+}
+
+float motor_get_duty_slope_limit_percent_per_s(void)
+{
+    return g_duty_slope_percent_per_s;
+}
+
+// 斜率限幅函数：根据全局参数与上次输出限制当前 duty 的变化，返回限制后的 duty
+static int16 apply_duty_slope_limit(int16 duty)
+{
+    float max_delta_f = g_duty_slope_percent_per_s * 0.01f * 10000.0f * MOTOR_PID_DT_S;
+    int16 max_delta = (int16)roundf(fabsf(max_delta_f));
+    if (max_delta < 1) max_delta = 1;
+    int16 delta = duty - s_prev_duty;
+    if (delta > max_delta) duty = s_prev_duty + max_delta;
+    else if (delta < -max_delta) duty = s_prev_duty - max_delta;
+    s_prev_duty = duty;
+    return duty;
+}
+
+// ============================ PID 默认参数 ============================
+static void motor_pid_init_default(motor_pid_t *pid)
+{
+    pid->kp = 1.0f;
+    pid->ki = 0.0f;
+    pid->kd = 0.0f;
+    pid->integrator = 0.0f;
+    pid->prev_error = 0.0f;
+    pid->prev_measurement = 0.0f;
+    pid->out_min = -1000.0f; // 输出映射到 duty 的范围
+    pid->out_max = 1000.0f;
+    pid->integrator_min = pid->out_min;
+    pid->integrator_max = pid->out_max;
+}
+
+static float motor_pid_compute(motor_pid_t *pid, float setpoint, float measurement, float dt)
+{
+    float error = setpoint - measurement;
+    float p = pid->kp * error;
+    pid->integrator += 0.5f * pid->ki * dt * (error + pid->prev_error);
+    if (pid->integrator > pid->integrator_max) pid->integrator = pid->integrator_max;
+    if (pid->integrator < pid->integrator_min) pid->integrator = pid->integrator_min;
+    float d = 0.0f;
+    if (dt > 0.0f) {
+        d = - pid->kd * (measurement - pid->prev_measurement) / dt;
+    }
+    float out = p + pid->integrator + d;
+    if (out > pid->out_max) out = pid->out_max;
+    if (out < pid->out_min) out = pid->out_min;
+    pid->prev_error = error;
+    pid->prev_measurement = measurement;
+    return out;
+}
+
+void motor_pid_init(void)
+{
+    motor_set_target_counts_per_5ms(200);
+    motor_pid_init_default(&g_motor_pid);
+    // 默认增益；后续可考虑提供 setter 接口集中调参
+    g_motor_pid.kp = 25.0f;
+    g_motor_pid.ki = 70.0f;
+    g_motor_pid.kd = 0.0003f;
+
+    // 输出限幅与积分限幅初始化（放这里以便集中配置）
+    g_motor_pid.out_min = -5000.0f;  // 映射到 duty 的最小值
+    g_motor_pid.out_max =  5000.0f;  // 映射到 duty 的最大值
+    g_motor_pid.integrator_min = -1000.0f; // 可根据实际需要调整
+    g_motor_pid.integrator_max =  1000.0f;
+
+    motor_speed_filtered_counts = 0.0f;
+    motor_pid_out = 0.0f;
+    motor_speed_raw_counts = 0;
+    count_motor_pid = 0;
+}
+
+void motor_set_target_counts_per_5ms(int16 target_counts)
+{
+    g_motor_target_counts = target_counts;
+}
+
+// 清除速度相关状态：原始 delta / 滤波值 / PID 积分与历史测量
+// 同时调用编码器层的速度清零，确保测量端与控制端一致
+void motor_clear_speed(void)
+{
+    motor_speed_raw_counts = 0;
+    motor_speed_filtered_counts = 0.0f;
+    motor_pid_reset();
+    // 清除编码器层的速度缓存并重置硬件计数器
+    encoder_clear_demo5_speed();
+}
+
+void motor_acc(float threshold_deg, int16 speed_fall, int16 speed_safe)
+{
+    // 基于 5ms 调用周期的滞回/保持：避免在阈值附近来回跳速
+    // - 进入阈值：|pitch| > threshold
+    // - 退出阈值：|pitch| < threshold - hysteresis
+    // - 不做保持时间：退出条件由 hysteresis 决定
+	#ifndef MOTOR_ACC_HYST_DEG
+	#define MOTOR_ACC_HYST_DEG  (1.0f)
+	#endif
+
+    const float abs_pitch = fabsf(show_pitch_deg);
+    const float thr_on = (threshold_deg > 0.0f) ? threshold_deg : 0.0f;
+    const float thr_off = (thr_on > MOTOR_ACC_HYST_DEG) ? (thr_on - MOTOR_ACC_HYST_DEG) : 0.0f;
+
+    static uint8 s_fall_mode = 0u;
+
+    if (!s_fall_mode)
+    {
+        // 安全模式：达到阈值则进入救车加速
+        if (abs_pitch > thr_on)
+        {
+            s_fall_mode = 1u;
+        }
+    }
+    else
+    {
+        // 救车模式：满足退出条件才回到安全速度（使用滞回避免抖动）
+        if (abs_pitch < thr_off)
+        {
+            s_fall_mode = 0u;
+        }
+    }
+
+    motor_set_target_counts_per_5ms(s_fall_mode ? speed_fall : speed_safe);
+}
+
+int16 motor_get_speed_counts_filtered(void)
+{
+    return (int16)roundf(motor_speed_filtered_counts);
+}
+
+void motor_control_task_5ms(void)
+{
+    // ============================ 读取编码器速度（counts/5ms） ============================
+    int16 raw = encoder_get_demo5_delta_5ms();
+    motor_speed_raw_counts = raw;
+
+    // ============================ EMA 滤波 ============================
+    motor_speed_filtered_counts = MOTOR_SPEED_ALPHA * motor_speed_filtered_counts + (1.0f - MOTOR_SPEED_ALPHA) * (float)raw;
+    // 在获取并滤波当前速度后（软起动/推动启动逻辑已移除）
+    
+    // 目标与测量（单位相同）
+    float setpoint = (float)g_motor_target_counts;
+    float measurement = motor_speed_filtered_counts;
+
+    // ============================ PID 计算 ============================
+    float out = -motor_pid_compute(&g_motor_pid, setpoint, measurement, MOTOR_PID_DT_S);
+    motor_pid_out = out;
+
+    // ============================ 输出映射到占空比并发送 ============================
+    int16 duty = (int16)roundf(out);
+    // 限幅（防止意外）
+    if (duty > 10000) duty = 10000;
+    if (duty < -10000) duty = -10000;
+
+    // 调用斜率限幅函数（基于全局可设置参数）
+    duty = apply_duty_slope_limit(duty);
+
+    show_duty = duty;
+
+    // 这里将 duty 写到左电机，右电机保持 0
+    small_driver_set_duty(0, duty);//左边左电机，右边右电机
+
+    count_motor_pid++;
+}
