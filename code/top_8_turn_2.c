@@ -20,7 +20,7 @@
 extern float show_yaw_deg;
 
 // 前置声明：避免依赖 Ttop_funtion.c 的 static 函数
-static inline uint8 ttop_yaw_delay_done_local(void);
+// static inline uint8 ttop_yaw_delay_done_local(void);
 
 // ============================ 可调参数（可按需要在此改） ============================
 
@@ -244,8 +244,8 @@ uint8 ttop_eight2_task_5ms(void)
 #endif
 }
 
-static inline uint8 ttop_yaw_delay_done_local(void)
-{
-	const led_bzw_show_status_t *st = led_bzw_show_status_get();
-	return (st && st->yaw_delay_done) ? 1u : 0u;
-}
+// static inline uint8 ttop_yaw_delay_done_local(void)
+// {
+// 	const led_bzw_show_status_t *st = led_bzw_show_status_get();
+// 	return (st && st->yaw_delay_done) ? 1u : 0u;
+// }

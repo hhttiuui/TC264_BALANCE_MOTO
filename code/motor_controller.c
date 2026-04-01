@@ -69,7 +69,7 @@ static void motor_pid_reset(void)
 #endif
 
 // 占空比斜率限制参数（单位：百分比/秒），可由外部通过 setter 修改
-static float g_duty_slope_percent_per_s = 300.0f;
+static float g_duty_slope_percent_per_s = 500.0f;
 
 // 外部接口：设置/获取占空比斜率限制
 void motor_set_duty_slope_limit_percent_per_s(float percent_per_s)

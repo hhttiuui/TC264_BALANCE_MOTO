@@ -20,18 +20,18 @@ extern volatile uint8 encoder_flag;
 extern float show_yaw_deg;
 uint8 count_20ms;
 
-// 前置声明：避免在定义前使用导致隐式声明/重定义
-static inline uint8 ttop_yaw_delay_done(void);
+// // 前置声明：避免在定义前使用导致隐式声明/重定义
+// static inline uint8 ttop_yaw_delay_done(void);
 
 
 // ============================ 主周期任务调用接口 ============================
 
 //=======此函数用于判断初始化是否完成，然后再调用pid=======//
-static inline uint8 ttop_yaw_delay_done(void)
-{
-	const led_bzw_show_status_t *st = led_bzw_show_status_get();
-	return (st && st->yaw_delay_done) ? 1u : 0u;
-}
+// static inline uint8 ttop_yaw_delay_done(void)
+// {
+// 	const led_bzw_show_status_t *st = led_bzw_show_status_get();
+// 	return (st && st->yaw_delay_done) ? 1u : 0u;
+// }
 
 volatile uint8 funtion_kemu = 1,funtion_ready_flag;
 
@@ -271,7 +271,7 @@ void ttop_funtion_init(void)
     //wifi_spi_demo_init();       // WiFi-SPI TCP初始化
     small_driver_uart_init();       // 初始化电机
 
-    led_bzw_show_init();         // LED 状态显示模块初始化
+    //led_bzw_show_init();         // LED 状态显示模块初始化
 
     // 惯性导航：航迹推算模块初始化
     ins_dr_init();

@@ -44,18 +44,6 @@ void ttop_encoder_task_5ms(void);
 // 婊¤冻鏉′欢鏃惰嚜鍔ㄦ竻 pid_flag 骞舵墽琛屽師鏉ョ殑 if{} 鍐呭
 void ttop_pid_task_5ms(void);
 
-// ============================ 璧涗簨鍔熻兘锛氳窛绂昏Е鍙戣浆寮� ============================
-// 鍒濆鍖栬浆寮帶鍒剁姸鎬侊紙鍙�夛級
-void ttop_turn_init(void);
-
-// 5ms 鏇存柊涓�娆¤浆寮帶鍒讹紙鍐呴儴锛氳窛绂昏Е鍙� -> 鐘舵�佹満 -> 姝ヨ繘鐩爣 -> 闄愰�熷钩婊戯級
-void ttop_turn_task_5ms(void);
-
-// ============================ 璧涗簨鍔熻兘锛�8瀛楃粫琛岋紙鍒嗘 宸�-涓�-鍙�-涓級 ============================
-void ttop_eight_init(void);
-
-// 5ms 鏇存柊涓�娆� 8瀛楄鍒掞紙鎸夆�滆鍒掕緭鍑哄埌浣嶁�濆垽瀹氾紝姣忔鐢ㄩ檺閫熷櫒骞虫粦杈撳嚭鍒� g_yaw_target_deg锛�
-void ttop_eight_task_5ms(void);
 static void load_saved_route_points(void);
 void ttop_key_task_5ms(void);//鎸夐敭閲囬泦
 
