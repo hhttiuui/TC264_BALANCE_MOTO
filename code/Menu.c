@@ -185,7 +185,7 @@ static const char *kkf_mode_str(uint8 mode)
     switch (mode)
     {
         case 1u: return "MODE 1 200";
-        case 2u: return "MODE 2 100";
+        case 2u: return "MODE 2 SPCHD";
         case 3u: return "MODE 3 55";
         case 4u: return "MODE 4 45";
         case 5u: return "MODE 5 200+T";
@@ -477,7 +477,7 @@ static void kkf_mode_select_draw(void)
     //   MODE 6
     ips200_show_string(0, 0 * 15, "KOU_KOU_FLY_CAR");
     ips200_show_string(16, 1 * 15, "MODE 1 200");
-    ips200_show_string(16, 2 * 15, "MODE 2 100");
+    ips200_show_string(16, 2 * 15, "MODE 2 SPCHD");
     ips200_show_string(16, 3 * 15, "MODE 3 55");
     ips200_show_string(16, 4 * 15, "MODE 4 45");
     ips200_show_string(16, 5 * 15, "MODE 5 200+T");

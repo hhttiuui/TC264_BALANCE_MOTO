@@ -108,6 +108,12 @@ extern pid_mode_cfg_t s_pid_mode_cfg[PID_MODE_CFG_COUNT];
 // 按模式一次性初始化 PID/AHRS/滤波/初值等
 void PID_INIT_BY_MODE(pid_mode_t mode);
 
+// 按模式热切换参数（不清零 PID 历史项）
+// 说明：
+// - 仅更新增益/限幅与电机目标速度，不执行 PID 实例重置。
+// - 适合同一控制策略下（例如 CASCADE 组内）按速度切参。
+void PID_HOT_SWITCH_BY_MODE(pid_mode_t mode);
+
 // 按模式周期执行 PID（函数名不包含周期，外部按实际调度频率调用即可）
 void pid_timer_handler_by_mode(pid_mode_t mode);
 

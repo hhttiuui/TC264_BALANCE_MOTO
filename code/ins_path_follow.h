@@ -103,25 +103,40 @@ typedef struct {
 #define INS_FILTER_ANGLE_EXIT_DEG     (7.0f)
 #endif
 
-/* 妯悜鍋忓樊闃堝�硷紙绫筹級锛氬嵆浣垮垽瀹氫负鐩寸嚎锛屾í鍚戝亸宸お澶т篃涓嶆姇褰� */
+/* 横向偏差阈值（米）：即使判定为直线，横向偏差太大也不投影 */
 #ifndef INS_FILTER_LATERAL_TH_M
 #define INS_FILTER_LATERAL_TH_M       (0.05f)
 #endif
 
-/* 鏈�灏忓弬鑰冩闀垮害锛堢背锛夛細娈靛お鐭椂鏂瑰悜瑙掍笉鍙潬锛岃烦杩囨护娉� */
+/* 最小参考段长度（米）：段太短时方向角不可靠，跳过滤波 */
 #ifndef INS_FILTER_MIN_SEG_M
 #define INS_FILTER_MIN_SEG_M          (0.05f)
 #endif
 
-#ifndef INS_PURSUIT_LOOKAHEAD_M
-#define INS_PURSUIT_LOOKAHEAD_M (0.80f)
+/* 录制结束后的离线路径平滑参数
+ * PASSES：平滑轮数，越大越圆滑
+ * BLEND ：每轮平滑混合比例，越大越柔和
+ */
+#ifndef INS_RECORD_SMOOTH_PASSES
+#define INS_RECORD_SMOOTH_PASSES      (2u)
 #endif
 
-/* 鍒拌揪缁堢偣鍒ゅ畾鍗婂緞锛堢背锛夛細
- *   璺濇渶鍚庝竴涓埅鐐瑰皬浜庤鍊� 鈫� 璁や负鍒拌揪缁堢偣 */
+#ifndef INS_RECORD_SMOOTH_BLEND
+#define INS_RECORD_SMOOTH_BLEND       (0.30f)
+#endif
+
+#ifndef INS_PURSUIT_LOOKAHEAD_M
+#define INS_PURSUIT_LOOKAHEAD_M (1.00f) //直线蛇形→调大 //弯道跟不上→调小
+#endif
+
+/* 到达终点判定半径（米）：
+ *   距最后一个航点小于该值 → 认为到达终点 */
 #ifndef INS_PATH_END_RADIUS_M
 #define INS_PATH_END_RADIUS_M   (0.15f)
 #endif
+
+
+
 
 /* ================================================================
  *  鑸偣琛紙瀵瑰鏆撮湶锛屽彲渚涘睆骞�/鑿滃崟鏌ョ湅鍜屼慨鏀癸級

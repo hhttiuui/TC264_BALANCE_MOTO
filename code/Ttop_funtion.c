@@ -49,9 +49,10 @@ void ttop_funtion_mode_once_apply(void)
 	{
 		PID_INIT_BY_MODE(PID_MODE_CASCADE);
 	}
-	else if (funtion_kemu == 2u)// MODE2：直线速度100
+	else if (funtion_kemu == 2u)// MODE2：变速
 	{		
-		PID_INIT_BY_MODE(PID_MODE_ANGLE);
+		PID_INIT_BY_MODE(PID_MODE_CASCADE_EX2);
+		ttop_speed_change_init();
 	}
 	else if (funtion_kemu == 3u)// MODE3：直线速度55
 	{
@@ -122,18 +123,8 @@ void ttop_encoder_task_5ms(void)
 	gpio_toggle_level(P21_2);
 }
 
-//=======按键边沿检测+按键任务，目前仅有切换模式功能=======//
 volatile uint8 eight_flag = 0;
 volatile uint16 eight_count = 0;
-void ttop_key_task_5ms(void)
-{
-	// 兼容保留：按键的采样/去抖已在 5ms 中断里统一调用 Key_Sample()。
-	// 为避免与菜单按键逻辑冲突，这里不再做任何“业务动作”(切模式/ready/清零)。
-	// 如果未来需要回退到“顶层快捷键”，可以在这里加一个开关分发。
-	(void)0;
-}
-
-
 
 
 //=======PID任务，5ms调用一次=======//
@@ -150,9 +141,9 @@ void ttop_pid_task_5ms(void)
 	{		
 		pid_timer_handler_by_mode(PID_MODE_CASCADE);
 	}
-	else if(funtion_kemu == 2)//直线速度100
+	else if(funtion_kemu == 2)//变速
 	{		
-		pid_timer_handler_by_mode(PID_MODE_ANGLE);
+		ttop_speed_change_task_5ms();
 	}
 	else if(funtion_kemu == 3)// MODE3：直线速度55
 	{	

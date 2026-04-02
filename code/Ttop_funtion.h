@@ -45,7 +45,6 @@ void ttop_encoder_task_5ms(void);
 void ttop_pid_task_5ms(void);
 
 static void load_saved_route_points(void);
-void ttop_key_task_5ms(void);//鎸夐敭閲囬泦
 
 // ============================ 妯″紡鍒囨崲锛氱數鏈虹洰鏍囧�间竴娆℃�ц缃� ============================
 // 寤鸿鍦� while(TRUE) 涓诲惊鐜噷鍛ㄦ湡璋冪敤锛堜緥濡傛瘡鍦堣皟鐢ㄤ竴娆″嵆鍙級銆�

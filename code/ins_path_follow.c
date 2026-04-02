@@ -4,57 +4,84 @@
  *  Created on: 2026-03-24
  *      Author: hhttiuui
  *
- *  惯性导航 - 路径跟踪与示教录制模块
+ *  鎯�у鑸� - 璺緞璺熻釜涓庣ず鏁欏綍鍒舵ā鍧�
  *
- *  ===================== Pure Pursuit 算法简介 =====================
- *  Pure Pursuit（纯追踪）是一种经典的路径跟踪算法：
- *    1. 在目标路径上找到距车辆最近的点（nearest）
- *    2. 从 nearest 沿路径往前找一个"预瞄点"（look-ahead point），
- *       该点与车辆的距离 ≈ 预瞄距离 L_d
- *    3. 计算车辆当前位置到预瞄点的航向角
- *    4. 将该航向角作为 g_yaw_target_deg，由 PID 链路执行转向
+ *  ===================== Pure Pursuit 绠楁硶绠�浠� =====================
+ *  Pure Pursuit锛堢函杩借釜锛夋槸涓�绉嶇粡鍏哥殑璺緞璺熻釜绠楁硶锛�
+ *    1. 鍦ㄧ洰鏍囪矾寰勪笂鎵惧埌璺濊溅杈嗘渶杩戠殑鐐癸紙nearest锛�
+ *    2. 浠� nearest 娌胯矾寰勫線鍓嶆壘涓�涓�"棰勭瀯鐐�"锛坙ook-ahead point锛夛紝
+ *       璇ョ偣涓庤溅杈嗙殑璺濈 鈮� 棰勭瀯璺濈 L_d
+ *    3. 璁＄畻杞﹁締褰撳墠浣嶇疆鍒伴鐬勭偣鐨勮埅鍚戣
+ *    4. 灏嗚鑸悜瑙掍綔涓� g_yaw_target_deg锛岀敱 PID 閾捐矾鎵ц杞悜
  *
- *  预瞄距离 L_d 的作用：
- *    L_d 越大 → 转弯越提前、越平滑，但跟踪精度略低
- *    L_d 越小 → 跟踪越紧凑，但容易产生振荡（尤其弯道处）
- *    经验值：车速(m/s) × (0.5~1.5)，低速小车建议 0.15~0.50m
+ *  棰勭瀯璺濈 L_d 鐨勪綔鐢細
+ *    L_d 瓒婂ぇ 鈫� 杞集瓒婃彁鍓嶃�佽秺骞虫粦锛屼絾璺熻釜绮惧害鐣ヤ綆
+ *    L_d 瓒婂皬 鈫� 璺熻釜瓒婄揣鍑戯紝浣嗗鏄撲骇鐢熸尟鑽★紙灏ゅ叾寮亾澶勶級
+ *    缁忛獙鍊硷細杞﹂��(m/s) 脳 (0.5~1.5)锛屼綆閫熷皬杞﹀缓璁� 0.15~0.50m
  */
 
 #include "zf_common_headfile.h"
 #include "ins_path_follow.h"
 #include "ins_dead_reckoning.h"
 
-/* PI 常量 */
+/* PI 甯搁噺 */
 #ifndef INS_PF_PI
 #define INS_PF_PI  (3.14159265358979f)
 #endif
 
 /* ================================================================
- *  航点表（全局，对外暴露）
+ *  杞集鍙樺寲鐜囬檺骞呭弬鏁帮紙Slew Rate Limiter锛�
+ *
+ *  浣滅敤锛氶檺鍒� g_yaw_target_deg 姣� 5ms 鏈�澶у彉鍖栭噺锛�
+ *        閬垮厤 Pure Pursuit 鍦ㄦ嫄寮鐨勭洰鏍囪埅鍚戠獊鍙�
+ *        瀵艰嚧 Yaw PID 鐚涙墦 鈫� 灏忚溅鍊掑湴銆�
+ *
+ *  INS_YAW_SLEW_RATE_DPS锛氭渶澶у厑璁哥殑鐩爣鑸悜鍙樺寲閫熺巼锛坉eg/s锛�
+ *    - 鍊艰秺澶э細杞集瓒婂揩锛堢伒鏁忥級锛屼絾瓒婂鏄撳�掕溅
+ *    - 鍊艰秺灏忥細杞集瓒婃參锛堝钩婊戯級锛屼絾鍙兘璺熶笉涓婃�ュ集
+ *    - 寤鸿浠� 60~120 deg/s 寮�濮嬭皟璇�
+ *    - 鍙傝�冿細鍏瓧缁曡榛樿涔熸槸 60 deg/s
+ *
+ *  姣� 5ms 姝ヨ繘閲� = INS_YAW_SLEW_RATE_DPS 脳 0.005
+ *    60 deg/s  鈫� 姣� 5ms 鏈�澶氬彉鍖� 0.30掳
+ *    90 deg/s  鈫� 姣� 5ms 鏈�澶氬彉鍖� 0.45掳
+ *    120 deg/s 鈫� 姣� 5ms 鏈�澶氬彉鍖� 0.60掳
+ * ================================================================ */
+#ifndef INS_YAW_SLEW_RATE_DPS
+#define INS_YAW_SLEW_RATE_DPS   (70.0f)
+#endif
+
+/* 姣� 5ms 璋冪敤涓�娆℃椂鐨勬渶澶ф杩涳紙deg锛� */
+#define INS_YAW_SLEW_MAX_STEP   ((float)INS_YAW_SLEW_RATE_DPS * 0.005f)
+
+/* ================================================================
+ *  鑸偣琛紙鍏ㄥ眬锛屽澶栨毚闇诧級
  * ================================================================ */
 volatile ins_waypoint_t g_ins_path[INS_PATH_MAX_POINTS];
 volatile uint16         g_ins_path_count = 0u;
 
 /* ================================================================
- *  内部状态：录制
+ *  鍐呴儴鐘舵�侊細褰曞埗
  * ================================================================ */
-static uint8  s_record_active      = 0u;     /* 1=录制中 0=未录制 */
-static float  s_record_last_odo_m  = 0.0f;   /* 上次录制点的里程 */
-static uint8  s_straight_mode      = 0u;     /* 迟滞状态：1=当前判定为直线 */
+static uint8  s_record_active      = 0u;     /* 1=褰曞埗涓� 0=鏈綍鍒� */
+static float  s_record_last_odo_m  = 0.0f;   /* 涓婃褰曞埗鐐圭殑閲岀▼ */
+static uint8  s_straight_mode      = 0u;     /* 杩熸粸鐘舵�侊細1=褰撳墠鍒ゅ畾涓虹洿绾� */
 
 /* ================================================================
- *  内部状态：跟踪
+ *  鍐呴儴鐘舵�侊細璺熻釜
  * ================================================================ */
-static uint8  s_follow_done     = 0u;   /* 1=已到终点 */
-static uint16 s_nearest_idx     = 0u;   /* 最近航点索引 */
-static uint16 s_lookahead_idx   = 0u;   /* 预瞄航点索引 */
-static float  s_cte             = 0.0f; /* 横向偏差（米） */
+static uint8  s_follow_done     = 0u;   /* 1=宸插埌缁堢偣 */
+static uint16 s_nearest_idx     = 0u;   /* 鏈�杩戣埅鐐圭储寮� */
+static uint16 s_lookahead_idx   = 0u;   /* 棰勭瀯鑸偣绱㈠紩 */
+static float  s_cte             = 0.0f; /* 妯悜鍋忓樊锛堢背锛� */
+static float  s_yaw_slew_out    = 0.0f; /* 鏂滅巼闄愬箙鍣ㄥ綋鍓嶈緭鍑猴紙deg锛� */
+static uint8  s_yaw_slew_inited = 0u;   /* 鏂滅巼闄愬箙鍣ㄦ槸鍚﹀凡鍒濆鍖� */
 
 /* ================================================================
- *  辅助函数
+ *  杈呭姪鍑芥暟
  * ================================================================ */
 
-/* 两点距离的平方（避免 sqrt，用于比较大小时更快） */
+/* 涓ょ偣璺濈鐨勫钩鏂癸紙閬垮厤 sqrt锛岀敤浜庢瘮杈冨ぇ灏忔椂鏇村揩锛� */
 static inline float ins_dist2(float x1, float y1, float x2, float y2)
 {
     float dx = x2 - x1;
@@ -62,13 +89,13 @@ static inline float ins_dist2(float x1, float y1, float x2, float y2)
     return dx * dx + dy * dy;
 }
 
-/* 两点距离 */
+/* 涓ょ偣璺濈 */
 static inline float ins_distf(float x1, float y1, float x2, float y2)
 {
     return sqrtf(ins_dist2(x1, y1, x2, y2));
 }
 
-/* 角度归一化到 [-180, +180) */
+/* 瑙掑害褰掍竴鍖栧埌 [-180, +180) */
 static inline float ins_wrap_deg(float deg)
 {
     while (deg >  180.0f) deg -= 360.0f;
@@ -77,34 +104,125 @@ static inline float ins_wrap_deg(float deg)
 }
 
 /* ================================================================
- *  录制滤波：滑动窗口直线判定 + 迟滞 + 弯道不过滤
+ *  Yaw 鐩爣鏂滅巼闄愬箙鍣紙Slew Rate Limiter锛�
  *
- *  算法流程：
- *    1) 取窗口内最近 N 个点（含新点）的连续线段
- *    2) 计算每段航向角，再计算相邻航向角之差
- *    3) 用迟滞判定当前是否"直线模式"：
- *       - 未进入直线模式时：所有角差 < ENTER 阈值 → 进入
- *       - 已在直线模式时：任一角差 > EXIT  阈值 → 退出
- *    4) 如果是直线模式：
- *       - 取最后一段 (P[n-1] → P_raw) 的方向为参考线
- *       - 计算新点到参考线的横向偏差
- *       - 若偏差小 → 投影到参考线
- *       - 若偏差大 → 保持原点（异常跳点保护）
- *    5) 如果不是直线模式：不做任何修改（保留弯道原始点）
+ *  瀵� Pure Pursuit 璁＄畻鍑虹殑鍘熷鐩爣鑸悜鍋氶檺閫熷钩婊戯細
+ *  姣� 5ms 鏈�澶氬彉鍖� INS_YAW_SLEW_MAX_STEP 搴︼紝
+ *  闇�瑕佹纭鐞嗚搴︾幆缁曪紙-180/+180 璺冲彉锛夈��
+ * ================================================================ */
+static float ins_yaw_slew_limit(float raw_target_deg)
+{
+    /* 棣栨璋冪敤锛氱洿鎺ヨ窡闅忥紝涓嶅仛闄愬箙 */
+    if (!s_yaw_slew_inited)
+    {
+        s_yaw_slew_inited = 1u;
+        s_yaw_slew_out = raw_target_deg;
+        return s_yaw_slew_out;
+    }
+
+    /* 璁＄畻瑙掑害宸紙澶勭悊 -180/+180 璺冲彉锛� */
+    float err = ins_wrap_deg(raw_target_deg - s_yaw_slew_out);
+
+    /* 闄愬箙 */
+    if (err > INS_YAW_SLEW_MAX_STEP)
+        err = INS_YAW_SLEW_MAX_STEP;
+    else if (err < -INS_YAW_SLEW_MAX_STEP)
+        err = -INS_YAW_SLEW_MAX_STEP;
+
+    s_yaw_slew_out = ins_wrap_deg(s_yaw_slew_out + err);
+    return s_yaw_slew_out;
+}
+
+/* ================================================================
+ *  录制结束后路径平滑
+ *
+ *  作用：
+ *    1) 让录制轨迹整体更顺滑，减小手推抖动
+ *    2) 让拐角由“尖折线”变得更圆滑
+ *
+ *  方法：
+ *    对内部点做多轮三点平滑：
+ *      avg = 0.25*prev + 0.5*curr + 0.25*next
+ *      curr = curr + blend * (avg - curr)
+ *
+ *  特点：
+ *    - 首尾点保持不动
+ *    - 轮数越多，轨迹越圆滑
+ *    - blend 越大，平滑越强
+ * ================================================================ */
+static void ins_record_smooth_path(void)
+{
+    if (g_ins_path_count < 3u) return;
+
+    static float sx[INS_PATH_MAX_POINTS];
+    static float sy[INS_PATH_MAX_POINTS];
+
+    uint16 count = g_ins_path_count;
+    uint16 pass;
+
+    for (pass = 0u; pass < (uint16)INS_RECORD_SMOOTH_PASSES; pass++)
+    {
+        uint16 i;
+
+        sx[0] = g_ins_path[0].x;
+        sy[0] = g_ins_path[0].y;
+        sx[count - 1u] = g_ins_path[count - 1u].x;
+        sy[count - 1u] = g_ins_path[count - 1u].y;
+
+        for (i = 1u; i + 1u < count; i++)
+        {
+            float prev_x = g_ins_path[i - 1u].x;
+            float prev_y = g_ins_path[i - 1u].y;
+            float curr_x = g_ins_path[i].x;
+            float curr_y = g_ins_path[i].y;
+            float next_x = g_ins_path[i + 1u].x;
+            float next_y = g_ins_path[i + 1u].y;
+
+            float avg_x = 0.25f * prev_x + 0.50f * curr_x + 0.25f * next_x;
+            float avg_y = 0.25f * prev_y + 0.50f * curr_y + 0.25f * next_y;
+
+            sx[i] = curr_x + (avg_x - curr_x) * (float)INS_RECORD_SMOOTH_BLEND;
+            sy[i] = curr_y + (avg_y - curr_y) * (float)INS_RECORD_SMOOTH_BLEND;
+        }
+
+        for (i = 1u; i + 1u < count; i++)
+        {
+            g_ins_path[i].x = sx[i];
+            g_ins_path[i].y = sy[i];
+        }
+    }
+}
+
+
+/* ================================================================
+ *  褰曞埗婊ゆ尝锛氭粦鍔ㄧ獥鍙ｇ洿绾垮垽瀹� + 杩熸粸 + 寮亾涓嶈繃婊�
+ *
+ *  绠楁硶娴佺▼锛�
+ *    1) 鍙栫獥鍙ｅ唴鏈�杩� N 涓偣锛堝惈鏂扮偣锛夌殑杩炵画绾挎
+ *    2) 璁＄畻姣忔鑸悜瑙掞紝鍐嶈绠楃浉閭昏埅鍚戣涔嬪樊
+ *    3) 鐢ㄨ繜婊炲垽瀹氬綋鍓嶆槸鍚�"鐩寸嚎妯″紡"锛�
+ *       - 鏈繘鍏ョ洿绾挎ā寮忔椂锛氭墍鏈夎宸� < ENTER 闃堝�� 鈫� 杩涘叆
+ *       - 宸插湪鐩寸嚎妯″紡鏃讹細浠讳竴瑙掑樊 > EXIT  闃堝�� 鈫� 閫�鍑�
+ *    4) 濡傛灉鏄洿绾挎ā寮忥細
+ *       - 鍙栨渶鍚庝竴娈� (P[n-1] 鈫� P_raw) 鐨勬柟鍚戜负鍙傝�冪嚎
+ *       - 璁＄畻鏂扮偣鍒板弬鑰冪嚎鐨勬í鍚戝亸宸�
+ *       - 鑻ュ亸宸皬 鈫� 鎶曞奖鍒板弬鑰冪嚎
+ *       - 鑻ュ亸宸ぇ 鈫� 淇濇寔鍘熺偣锛堝紓甯歌烦鐐逛繚鎶わ級
+ *    5) 濡傛灉涓嶆槸鐩寸嚎妯″紡锛氫笉鍋氫换浣曚慨鏀癸紙淇濈暀寮亾鍘熷鐐癸級
  * ================================================================ */
 static void ins_record_filter_point(float *px, float *py)
 {
     if ((float *)0 == px || (float *)0 == py) return;
 
-    /* 窗口内需要 (WINDOW_SIZE - 1) 个已有点 + 1 个新点 */
+    /* 绐楀彛鍐呴渶瑕� (WINDOW_SIZE - 1) 涓凡鏈夌偣 + 1 涓柊鐐� */
     uint16 win = (uint16)INS_FILTER_WINDOW_SIZE;
-    if (g_ins_path_count < (uint16)(win - 1u)) return;   /* 点太少，跳过 */
+    if (g_ins_path_count < (uint16)(win - 1u)) return;   /* 鐐瑰お灏戯紝璺宠繃 */
 
-    /* ---- 收集窗口内各段的航向角 ---- */
-    /* 段数 = win-1 = 3  (P[n-3]→P[n-2], P[n-2]→P[n-1], P[n-1]→P_raw) */
+    /* ---- 鏀堕泦绐楀彛鍐呭悇娈电殑鑸悜瑙� ---- */
+    /* 娈垫暟 = win-1 = 3  (P[n-3]鈫扨[n-2], P[n-2]鈫扨[n-1], P[n-1]鈫扨_raw) */
     uint16 n_segs = (uint16)(win - 1u);
-    float  angles[3];    /* 最多 3 段（窗口 = 4） */
-    uint8  seg_ok = 1u;  /* 是否所有段长度都合格 */
+    float  angles[3];    /* 鏈�澶� 3 娈碉紙绐楀彛 = 4锛� */
+    uint8  seg_ok = 1u;  /* 鏄惁鎵�鏈夋闀垮害閮藉悎鏍� */
 
     uint16 i;
     for (i = 0u; i < n_segs; i++)
@@ -113,7 +231,7 @@ static void ins_record_filter_point(float *px, float *py)
 
         if (i < (uint16)(n_segs - 1u))
         {
-            /* 已有航点之间的段 */
+            /* 宸叉湁鑸偣涔嬮棿鐨勬 */
             uint16 idx_a = (uint16)(g_ins_path_count - (win - 1u) + i);
             uint16 idx_b = (uint16)(idx_a + 1u);
             ax = g_ins_path[idx_a].x;
@@ -123,7 +241,7 @@ static void ins_record_filter_point(float *px, float *py)
         }
         else
         {
-            /* 最后一段：P[n-1] → P_raw（新点） */
+            /* 鏈�鍚庝竴娈碉細P[n-1] 鈫� P_raw锛堟柊鐐癸級 */
             uint16 idx_a = (uint16)(g_ins_path_count - 1u);
             ax = g_ins_path[idx_a].x;
             ay = g_ins_path[idx_a].y;
@@ -142,15 +260,15 @@ static void ins_record_filter_point(float *px, float *py)
         angles[i] = atan2f(sdy, sdx) * (180.0f / INS_PF_PI);
     }
 
-    /* 如果有任何段太短 → 方向角不可靠，跳过滤波，保持原点 */
+    /* 濡傛灉鏈変换浣曟澶煭 鈫� 鏂瑰悜瑙掍笉鍙潬锛岃烦杩囨护娉紝淇濇寔鍘熺偣 */
     if (!seg_ok)
     {
         s_straight_mode = 0u;
         return;
     }
 
-    /* ---- 计算相邻段的航向角差 ---- */
-    /* 角差数 = n_segs - 1 = 2 */
+    /* ---- 璁＄畻鐩搁偦娈电殑鑸悜瑙掑樊 ---- */
+    /* 瑙掑樊鏁� = n_segs - 1 = 2 */
     float max_angle_diff = 0.0f;
     for (i = 0u; i + 1u < n_segs; i++)
     {
@@ -158,10 +276,10 @@ static void ins_record_filter_point(float *px, float *py)
         if (diff > max_angle_diff) max_angle_diff = diff;
     }
 
-    /* ---- 迟滞判定：是否进入/退出直线模式 ---- */
+    /* ---- 杩熸粸鍒ゅ畾锛氭槸鍚﹁繘鍏�/閫�鍑虹洿绾挎ā寮� ---- */
     if (s_straight_mode == 0u)
     {
-        /* 未在直线模式 → 用 ENTER 阈值（更严格）判定是否进入 */
+        /* 鏈湪鐩寸嚎妯″紡 鈫� 鐢� ENTER 闃堝�硷紙鏇翠弗鏍硷級鍒ゅ畾鏄惁杩涘叆 */
         if (max_angle_diff < (float)INS_FILTER_ANGLE_ENTER_DEG)
         {
             s_straight_mode = 1u;
@@ -169,23 +287,23 @@ static void ins_record_filter_point(float *px, float *py)
     }
     else
     {
-        /* 已在直线模式 → 用 EXIT 阈值（更宽松）判定是否退出 */
+        /* 宸插湪鐩寸嚎妯″紡 鈫� 鐢� EXIT 闃堝�硷紙鏇村鏉撅級鍒ゅ畾鏄惁閫�鍑� */
         if (max_angle_diff > (float)INS_FILTER_ANGLE_EXIT_DEG)
         {
             s_straight_mode = 0u;
         }
     }
 
-    /* ---- 如果不在直线模式 → 弯道，不做任何修改 ---- */
+    /* ---- 濡傛灉涓嶅湪鐩寸嚎妯″紡 鈫� 寮亾锛屼笉鍋氫换浣曚慨鏀� ---- */
     if (s_straight_mode == 0u) return;
 
-    /* ---- 在直线模式 → 将新点投影到最后一段方向线上 ---- */
+    /* ---- 鍦ㄧ洿绾挎ā寮� 鈫� 灏嗘柊鐐规姇褰卞埌鏈�鍚庝竴娈垫柟鍚戠嚎涓� ---- */
     {
         uint16 ref_idx = (uint16)(g_ins_path_count - 1u);
         float rx = g_ins_path[ref_idx].x;
         float ry = g_ins_path[ref_idx].y;
 
-        /* 参考方向：用最后一段已有线段的方向（更稳定） */
+        /* 鍙傝�冩柟鍚戯細鐢ㄦ渶鍚庝竴娈靛凡鏈夌嚎娈电殑鏂瑰悜锛堟洿绋冲畾锛� */
         float dx, dy, seg_len;
         if (g_ins_path_count >= 2u)
         {
@@ -201,19 +319,19 @@ static void ins_record_filter_point(float *px, float *py)
             seg_len = sqrtf(dx * dx + dy * dy);
         }
 
-        if (seg_len < 0.001f) return;  /* 安全检查 */
+        if (seg_len < 0.001f) return;  /* 瀹夊叏妫�鏌� */
 
-        /* 计算新点相对参考点的横向偏差 */
+        /* 璁＄畻鏂扮偣鐩稿鍙傝�冪偣鐨勬í鍚戝亸宸� */
         float vx = (*px) - rx;
         float vy = (*py) - ry;
         float lateral = fabsf((vx * dy - vy * dx) / seg_len);
 
-        /* 横向偏差太大 → 异常点，不投影 */
+        /* 妯悜鍋忓樊澶ぇ 鈫� 寮傚父鐐癸紝涓嶆姇褰� */
         if (lateral > (float)INS_FILTER_LATERAL_TH_M) return;
 
-        /* 沿参考方向投影 */
+        /* 娌垮弬鑰冩柟鍚戞姇褰� */
         float t = (vx * dx + vy * dy) / (seg_len * seg_len);
-        if (t < 0.0f) t = 0.0f;  /* 不允许往回投影 */
+        if (t < 0.0f) t = 0.0f;  /* 涓嶅厑璁稿線鍥炴姇褰� */
 
         *px = rx + t * dx;
         *py = ry + t * dy;
@@ -222,21 +340,21 @@ static void ins_record_filter_point(float *px, float *py)
 
 
 /* ================================================================
- *  A. 路径录制
+ *  A. 璺緞褰曞埗
  * ================================================================ */
 
 void ins_path_record_init(void)
 {
-    /* 清空航点表 */
+    /* 娓呯┖鑸偣琛� */
     g_ins_path_count = 0u;
     s_record_active = 1u;
     s_record_last_odo_m = 0.0f;
     s_straight_mode = 0u;
 
-    /* 重置航迹推算：位置归零 */
+    /* 閲嶇疆鑸抗鎺ㄧ畻锛氫綅缃綊闆� */
     ins_dr_reset();
 
-    /* 记录起始点 (0, 0) */
+    /* 璁板綍璧峰鐐� (0, 0) */
     if (g_ins_path_count < (uint16)INS_PATH_MAX_POINTS)
     {
         g_ins_path[g_ins_path_count].x = 0.0f;
@@ -249,17 +367,17 @@ uint16 ins_path_record_task_5ms(void)
 {
     if (!s_record_active) return g_ins_path_count;
 
-    /* 航点表录满 → 自动停止 */
+    /* 鑸偣琛ㄥ綍婊� 鈫� 鑷姩鍋滄 */
     if (g_ins_path_count >= (uint16)INS_PATH_MAX_POINTS)
     {
         s_record_active = 0u;
         return g_ins_path_count;
     }
 
-    /* 更新航迹推算（位置 + 里程） */
+    /* 鏇存柊鑸抗鎺ㄧ畻锛堜綅缃� + 閲岀▼锛� */
     ins_dr_update_5ms();
 
-    /* 检查是否行驶了足够的距离 → 录入新航点 */
+    /* 妫�鏌ユ槸鍚﹁椹朵簡瓒冲鐨勮窛绂� 鈫� 褰曞叆鏂拌埅鐐� */
     float odo = ins_dr_get_odometer_m();
     if ((odo - s_record_last_odo_m) >= (float)INS_RECORD_INTERVAL_M)
     {
@@ -282,13 +400,13 @@ void ins_path_record_stop(void)
     if (!s_record_active) return;
     s_record_active = 0u;
 
-    /* 补录最后一个点（当前位置），避免尾段丢失 */
+    /* 琛ュ綍鏈�鍚庝竴涓偣锛堝綋鍓嶄綅缃級锛岄伩鍏嶅熬娈典涪澶� */
     if (g_ins_path_count > 0u && g_ins_path_count < (uint16)INS_PATH_MAX_POINTS)
     {
         float cx = ins_dr_get_pos_x();
         float cy = ins_dr_get_pos_y();
 
-        /* 与上一个航点距离太近（< 1cm）则不重复录入 */
+        /* 涓庝笂涓�涓埅鐐硅窛绂诲お杩戯紙< 1cm锛夊垯涓嶉噸澶嶅綍鍏� */
         float last_x = g_ins_path[g_ins_path_count - 1u].x;
         float last_y = g_ins_path[g_ins_path_count - 1u].y;
         if (ins_distf(cx, cy, last_x, last_y) > 0.01f)
@@ -303,7 +421,7 @@ void ins_path_record_stop(void)
 uint8 ins_path_record_is_active(void) { return s_record_active; }
 
 /* ================================================================
- *  B. 路径生成（数学公式）
+ *  B. 璺緞鐢熸垚锛堟暟瀛﹀叕寮忥級
  * ================================================================ */
 
 void ins_path_gen_circle(float radius_m, uint16 num_points)
@@ -314,23 +432,23 @@ void ins_path_gen_circle(float radius_m, uint16 num_points)
     float R = fabsf(radius_m);
     if (R < 0.01f) R = 0.01f;
 
-    /* 正值 = 左转（逆时针），负值 = 右转（顺时针） */
+    /* 姝ｅ�� = 宸﹁浆锛堥�嗘椂閽堬級锛岃礋鍊� = 鍙宠浆锛堥『鏃堕拡锛� */
     float dir = (radius_m >= 0.0f) ? 1.0f : -1.0f;
 
     /*
-     * 圆形路径，起点 (0, 0)，初始朝向 +X（与 yaw=0° 一致）：
+     * 鍦嗗舰璺緞锛岃捣鐐� (0, 0)锛屽垵濮嬫湞鍚� +X锛堜笌 yaw=0掳 涓�鑷达級锛�
      *
-     *   左转（dir=+1）：圆心 = (0, +R)
-     *     x(t) = R × sin(t)
-     *     y(t) = R × (1 - cos(t))
-     *     t=0: (0, 0)  t=π/2: (R, R)  t=π: (0, 2R)
+     *   宸﹁浆锛坉ir=+1锛夛細鍦嗗績 = (0, +R)
+     *     x(t) = R 脳 sin(t)
+     *     y(t) = R 脳 (1 - cos(t))
+     *     t=0: (0, 0)  t=蟺/2: (R, R)  t=蟺: (0, 2R)
      *
-     *   右转（dir=-1）：圆心 = (0, -R)
-     *     x(t) = R × sin(t)
-     *     y(t) = -R × (1 - cos(t))
-     *     t=0: (0, 0)  t=π/2: (R, -R)  t=π: (0, -2R)
+     *   鍙宠浆锛坉ir=-1锛夛細鍦嗗績 = (0, -R)
+     *     x(t) = R 脳 sin(t)
+     *     y(t) = -R 脳 (1 - cos(t))
+     *     t=0: (0, 0)  t=蟺/2: (R, -R)  t=蟺: (0, -2R)
      *
-     *   t ∈ [0, 2π) → 走完一整圈回到 (0,0)
+     *   t 鈭� [0, 2蟺) 鈫� 璧板畬涓�鏁村湀鍥炲埌 (0,0)
      */
     g_ins_path_count = 0u;
     for (uint16 i = 0u; i < num_points; i++)
@@ -354,22 +472,22 @@ void ins_path_gen_eight(float radius_m, uint16 num_points_per_circle)
     g_ins_path_count = 0u;
 
     /*
-     * 8 字 = 先左转一圈 + 再右转一圈
+     * 8 瀛� = 鍏堝乏杞竴鍦� + 鍐嶅彸杞竴鍦�
      *
-     * 左圆：圆心 (0, +R)，逆时针
-     *   x(t) = R × sin(t)
-     *   y(t) = R × (1 - cos(t))
-     *   t ∈ [0, 2π)
-     *   起点 (0,0)，终点回到 (0,0)
+     * 宸﹀渾锛氬渾蹇� (0, +R)锛岄�嗘椂閽�
+     *   x(t) = R 脳 sin(t)
+     *   y(t) = R 脳 (1 - cos(t))
+     *   t 鈭� [0, 2蟺)
+     *   璧风偣 (0,0)锛岀粓鐐瑰洖鍒� (0,0)
      *
-     * 右圆：圆心 (0, -R)，顺时针
-     *   x(t) = R × sin(t)
-     *   y(t) = -R × (1 - cos(t))
-     *   t ∈ [0, 2π)
-     *   起点 (0,0)，终点回到 (0,0)
+     * 鍙冲渾锛氬渾蹇� (0, -R)锛岄『鏃堕拡
+     *   x(t) = R 脳 sin(t)
+     *   y(t) = -R 脳 (1 - cos(t))
+     *   t 鈭� [0, 2蟺)
+     *   璧风偣 (0,0)锛岀粓鐐瑰洖鍒� (0,0)
      */
 
-    /* ---- 左圆（逆时针）---- */
+    /* ---- 宸﹀渾锛堥�嗘椂閽堬級---- */
     for (uint16 i = 0u; i < npc; i++)
     {
         float t = (float)i * (2.0f * INS_PF_PI / (float)npc);
@@ -377,7 +495,7 @@ void ins_path_gen_eight(float radius_m, uint16 num_points_per_circle)
         g_ins_path[i].y = R * (1.0f - cosf(t));
     }
 
-    /* ---- 右圆（顺时针）---- */
+    /* ---- 鍙冲渾锛堥『鏃堕拡锛�---- */
     for (uint16 i = 0u; i < npc; i++)
     {
         float t = (float)i * (2.0f * INS_PF_PI / (float)npc);
@@ -389,43 +507,47 @@ void ins_path_gen_eight(float radius_m, uint16 num_points_per_circle)
 }
 
 /* ================================================================
- *  C. 路径跟踪（Pure Pursuit）
+ *  C. 璺緞璺熻釜锛圥ure Pursuit锛�
  * ================================================================ */
 
 void ins_path_follow_init(void)
 {
-    /* 航迹推算归零：跟踪起点 = 坐标原点 */
+    /* 鑸抗鎺ㄧ畻褰掗浂锛氳窡韪捣鐐� = 鍧愭爣鍘熺偣 */
     ins_dr_reset();
 
-    /* 跟踪状态归零 */
+    /* 璺熻釜鐘舵�佸綊闆� */
     s_follow_done   = 0u;
     s_nearest_idx   = 0u;
     s_lookahead_idx = 0u;
     s_cte           = 0.0f;
+
+    /* 鏂滅巼闄愬箙鍣ㄥ綊闆讹細涓嬫杩涘叆鏃堕噸鏂板垵濮嬪寲 */
+    s_yaw_slew_inited = 0u;
+    s_yaw_slew_out    = 0.0f;
 }
 
 uint8 ins_path_follow_task_5ms(void)
 {
-    /* 航点不足，无法跟踪 */
+    /* 鑸偣涓嶈冻锛屾棤娉曡窡韪� */
     if (g_ins_path_count < 2u)
     {
         s_follow_done = 1u;
         return 1u;
     }
 
-    /* 已到达终点，保持最后一次输出 */
+    /* 宸插埌杈剧粓鐐癸紝淇濇寔鏈�鍚庝竴娆¤緭鍑� */
     if (s_follow_done) return 1u;
 
-    /* ---- 1) 更新航迹推算 → 获取当前位置 ---- */
+    /* ---- 1) 鏇存柊鑸抗鎺ㄧ畻 鈫� 鑾峰彇褰撳墠浣嶇疆 ---- */
     ins_dr_update_5ms();
 
     float cx = ins_dr_get_pos_x();
     float cy = ins_dr_get_pos_y();
 
-    /* ---- 2) 搜索最近航点（从上次 nearest 附近搜索，避免全表遍历）----
+    /* ---- 2) 鎼滅储鏈�杩戣埅鐐癸紙浠庝笂娆� nearest 闄勮繎鎼滅储锛岄伩鍏嶅叏琛ㄩ亶鍘嗭級----
      *
-     *  搜索窗口：[nearest - 5, nearest + 30]
-     *  向前偏置更多，因为车只往前走，nearest 只应前进不后退
+     *  鎼滅储绐楀彛锛歔nearest - 5, nearest + 30]
+     *  鍚戝墠鍋忕疆鏇村锛屽洜涓鸿溅鍙線鍓嶈蛋锛宯earest 鍙簲鍓嶈繘涓嶅悗閫�
      */
     {
         uint16 best_idx = s_nearest_idx;
@@ -449,10 +571,10 @@ uint8 ins_path_follow_task_5ms(void)
         s_nearest_idx = best_idx;
     }
 
-    /* ---- 3) 搜索预瞄点（look-ahead point）----
+    /* ---- 3) 鎼滅储棰勭瀯鐐癸紙look-ahead point锛�----
      *
-     *  从 nearest 开始向前找，直到某航点与当前位置的距离 >= 预瞄距离 L_d。
-     *  若到路径末尾仍未达到 L_d，则使用最后一个航点。
+     *  浠� nearest 寮�濮嬪悜鍓嶆壘锛岀洿鍒版煇鑸偣涓庡綋鍓嶄綅缃殑璺濈 >= 棰勭瀯璺濈 L_d銆�
+     *  鑻ュ埌璺緞鏈熬浠嶆湭杈惧埌 L_d锛屽垯浣跨敤鏈�鍚庝竴涓埅鐐广��
      */
     {
         float La = (float)INS_PURSUIT_LOOKAHEAD_M;
@@ -464,15 +586,15 @@ uint8 ins_path_follow_task_5ms(void)
             la_idx = i;
             if (d >= La)
             {
-                break;  /* 找到了满足预瞄距离的航点 */
+                break;  /* 鎵惧埌浜嗘弧瓒抽鐬勮窛绂荤殑鑸偣 */
             }
         }
         s_lookahead_idx = la_idx;
     }
 
-    /* ---- 4) 终点判定 ----
+    /* ---- 4) 缁堢偣鍒ゅ畾 ----
      *
-     *  条件：预瞄点已经是最后一个航点 且 距离终点 < 判定半径
+     *  鏉′欢锛氶鐬勭偣宸茬粡鏄渶鍚庝竴涓埅鐐� 涓� 璺濈缁堢偣 < 鍒ゅ畾鍗婂緞
      */
     {
         float dist_to_end = ins_distf(cx, cy,
@@ -487,10 +609,16 @@ uint8 ins_path_follow_task_5ms(void)
         }
     }
 
-    /* ---- 5) 计算目标航向角 → 写入 g_yaw_target_deg ----
+    /* ---- 5) 璁＄畻鐩爣鑸悜瑙� 鈫� 闄愬箙骞虫粦 鈫� 鍐欏叆 g_yaw_target_deg ----
      *
-     *  目标航向 = atan2(goal_y - pos_y, goal_x - pos_x)
-     *  该角度在与 show_yaw_deg 相同的坐标系中（0° = +X，逆时针为正）
+     *  鐩爣鑸悜 = atan2(goal_y - pos_y, goal_x - pos_x)
+     *  璇ヨ搴﹀湪涓� show_yaw_deg 鐩稿悓鐨勫潗鏍囩郴涓紙0掳 = +X锛岄�嗘椂閽堜负姝ｏ級
+     *
+     *  銆愰檺骞呭钩婊戙�戯細Pure Pursuit 璁＄畻鍑虹殑 target_deg 鍙兘鍦ㄥ集閬撳
+     *  浜х敓绐佸彉锛堜緥濡傜洿绾库啋寮亾鐬棿璺冲彉 30~90掳锛夛紝瀵艰嚧 Yaw PID
+     *  鐚涙墦鑸垫満 鈫� 灏忚溅澶у箙鍋忚浆鍊掑湴銆�
+     *  閫氳繃 ins_yaw_slew_limit() 闄愬埗姣� 5ms 鏈�澶у彉鍖栭噺锛�
+     *  浣胯浆寮繃绋嬪钩婊戙�佸彲鎺с��
      */
     {
         float goal_x = g_ins_path[s_lookahead_idx].x;
@@ -499,17 +627,18 @@ uint8 ins_path_follow_task_5ms(void)
         float target_rad = atan2f(goal_y - cy, goal_x - cx);
         float target_deg = target_rad * (180.0f / INS_PF_PI);
 
-        g_yaw_target_deg = target_deg;
+        /* 鏂滅巼闄愬箙锛氶檺鍒剁洰鏍囪埅鍚戝彉鍖栭�熺巼锛岄槻姝㈡�ヨ浆鍊掕溅 */
+        g_yaw_target_deg = ins_yaw_slew_limit(target_deg);
     }
 
-    /* ---- 6) 计算横向偏差 CTE（用于调试/显示）----
+    /* ---- 6) 璁＄畻妯悜鍋忓樊 CTE锛堢敤浜庤皟璇�/鏄剧ず锛�----
      *
-     *  方法：最近航点 → 下一个航点构成路径线段 AB，
-     *        车辆位置 C 到 AB 的带符号垂直距离。
+     *  鏂规硶锛氭渶杩戣埅鐐� 鈫� 涓嬩竴涓埅鐐规瀯鎴愯矾寰勭嚎娈� AB锛�
+     *        杞﹁締浣嶇疆 C 鍒� AB 鐨勫甫绗﹀彿鍨傜洿璺濈銆�
      *
-     *  公式：CTE = ((B-A) × (C-A)) / |B-A|
-     *        叉积正 → C 在 AB 左侧（CTE > 0）
-     *        叉积负 → C 在 AB 右侧（CTE < 0）
+     *  鍏紡锛欳TE = ((B-A) 脳 (C-A)) / |B-A|
+     *        鍙夌Н姝� 鈫� C 鍦� AB 宸︿晶锛圕TE > 0锛�
+     *        鍙夌Н璐� 鈫� C 鍦� AB 鍙充晶锛圕TE < 0锛�
      */
     if (s_nearest_idx + 1u < g_ins_path_count)
     {
@@ -526,7 +655,7 @@ uint8 ins_path_follow_task_5ms(void)
         float ab_len = sqrtf(abx * abx + aby * aby);
         if (ab_len > 0.001f)
         {
-            /* 二维叉积：AB × AC = abx*acy - aby*acx */
+            /* 浜岀淮鍙夌Н锛欰B 脳 AC = abx*acy - aby*acx */
             s_cte = (abx * acy - aby * acx) / ab_len;
         }
     }
@@ -537,7 +666,7 @@ uint8 ins_path_follow_task_5ms(void)
 uint8 ins_path_follow_is_done(void) { return s_follow_done; }
 
 /* ================================================================
- *  调试信息读取
+ *  璋冭瘯淇℃伅璇诲彇
  * ================================================================ */
 float  ins_path_get_cte(void)           { return s_cte; }
 uint16 ins_path_get_nearest_idx(void)   { return s_nearest_idx; }

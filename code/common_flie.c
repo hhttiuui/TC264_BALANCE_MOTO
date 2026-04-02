@@ -381,6 +381,17 @@ static void pid_apply_gains(pid_t *pid, const pid_gains_cfg_t *cfg)
 	pid_set_integrator_limits(pid, cfg->i_min, cfg->i_max);
 }
 
+static void pid_apply_gains_hot(pid_t *pid, const pid_gains_cfg_t *cfg)
+{
+	pid_set_gains(pid, cfg->kp, cfg->ki, cfg->kd);
+	pid_set_limits(pid, cfg->out_min, cfg->out_max);
+	pid_set_integrator_limits(pid, cfg->i_min, cfg->i_max);
+
+	// 热切换时保留历史项，但把积分值夹到新的积分限幅内。
+	if (pid->integrator > pid->integrator_max) pid->integrator = pid->integrator_max;
+	if (pid->integrator < pid->integrator_min) pid->integrator = pid->integrator_min;
+}
+
 void PID_INIT_BY_MODE(pid_mode_t mode)
 {
 	const pid_mode_cfg_t *cfg = pid_mode_cfg_get(mode);
@@ -416,6 +427,33 @@ void PID_INIT_BY_MODE(pid_mode_t mode)
 	pid_target = 0.0f;
 	servo_output_cb(cfg->servo_init_out);
 	motor_set_target_counts_per_5ms(cfg->motor_target_counts_5ms);
+}
+
+void PID_HOT_SWITCH_BY_MODE(pid_mode_t mode)
+{
+	const pid_mode_cfg_t *cfg = pid_mode_cfg_get(mode);
+
+	// yaw PID：所有模式都会用
+	pid_apply_gains_hot(&g_pid_yaw, &cfg->yaw);
+
+	// 角度 PID：根据策略更新当前使用的实例
+	if (cfg->strategy == PID_STRAT_CASCADE || cfg->strategy == PID_STRAT_ANGLE_ONLY)
+	{
+		pid_apply_gains_hot(&g_pid_angle, &cfg->angle);
+	}
+	else
+	{
+		pid_apply_gains_hot(&g_pid_angle_two, &cfg->angle);
+	}
+
+	// 角速度 PID：仅 cascade 使用
+	if (cfg->strategy == PID_STRAT_CASCADE)
+	{
+		pid_apply_gains_hot(&g_pid_rate, &cfg->rate);
+	}
+
+	// 与速度分档相关：热切换时同步更新目标速度。
+	//motor_set_target_counts_per_5ms(cfg->motor_target_counts_5ms);
 }
 
 static float pid_compute_yaw_target_with_gate(const pid_mode_cfg_t *cfg, float pitch_deg, float yaw_rel_deg)
