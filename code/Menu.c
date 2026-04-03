@@ -41,6 +41,7 @@ typedef enum
     UI_PAGE_KKF_GPS_DEBUG = 15,      // 界面1_1_9：GPS 调试入口（四项空菜单）
     UI_PAGE_KKF_GPS_ROUTE = 16,      // 专门界面：显示已保存路线（点/线）
     UI_PAGE_KKF_GPS_HEADINGS = 17,   // 专门界面：显示多段航向角
+    UI_PAGE_KKF_CON_DBG = 18,        // 界面1_1_10：遥控器通道调试
 
     // 界面1_1_4 ~ 1_1_8：PID 参数（直接操作 s_pid_mode_cfg）
     UI_PAGE_KKF_PID_CASCADE = 5,
@@ -341,6 +342,7 @@ static void kkf_param_draw(void)
     //   eight_turn
     //   PID_CHANGE（进入编辑）
     //   PID_MODE（选择要改哪套 PID）
+    //   CON_DBG（遥控器通道调试）
     ips200_show_string(0, 0 * 15, "KOU_KOU_FLY_CAR");
     ips200_show_string(16, 1 * 15, "MODE SEL:");
     ips200_show_string(16 * 8, 1 * 15, (char *)kkf_mode_str(s_kkf_mode));
@@ -350,8 +352,38 @@ static void kkf_param_draw(void)
     ips200_show_string(16, 4 * 15, "PID_CHANGE");
     ips200_show_string(16, 5 * 15, "PID_MODE:");
     ips200_show_string(16 * 8, 5 * 15, (char *)kkf_pid_mode_str((pid_mode_t)s_kkf_pid_mode_id));
+    ips200_show_string(16, 6 * 15, "CON_DBG");
 
     ips200_show_string(0, s_kkf_param_item * 15, "> ");
+
+    kkf_draw_signature_bottom();
+}
+
+static void kkf_con_dbg_draw(void)
+{
+    ips200_show_string(0, 0 * 15, "KOU_KOU_FLY_CAR");
+    ips200_show_string(16, 1 * 15, "CON_DBG");
+
+    ips200_show_string(16, 2 * 15, "CH1:");
+    ips200_show_int(16 * 6, 2 * 15, (int32)uart_receiver.channel[0], 5);
+
+    ips200_show_string(16, 3 * 15, "CH2:");
+    ips200_show_int(16 * 6, 3 * 15, (int32)uart_receiver.channel[1], 5);
+
+    ips200_show_string(16, 4 * 15, "CH3:");
+    ips200_show_int(16 * 6, 4 * 15, (int32)uart_receiver.channel[2], 5);
+
+    ips200_show_string(16, 5 * 15, "CH4:");
+    ips200_show_int(16 * 6, 5 * 15, (int32)uart_receiver.channel[3], 5);
+
+    ips200_show_string(16, 6 * 15, "CH5:");
+    ips200_show_int(16 * 6, 6 * 15, (int32)uart_receiver.channel[4], 5);
+
+    ips200_show_string(16, 7 * 15, "CH6:");
+    ips200_show_int(16 * 6, 7 * 15, (int32)uart_receiver.channel[5], 5);
+
+    ips200_show_string(16, 8 * 15, "STATE:");
+    ips200_show_string(16 * 8, 8 * 15, (uart_receiver.state == 1u) ? "OK" : "FAIL");
 
     kkf_draw_signature_bottom();
 }
@@ -688,6 +720,10 @@ void User_Interface(void)//UI显示
         else if (s_ui_page == UI_PAGE_KKF_GPS_DEBUG)
         {
             kkf_gps_debug_draw();
+        }
+        else if (s_ui_page == UI_PAGE_KKF_CON_DBG)
+        {
+            kkf_con_dbg_draw();
         }
 
         else if (s_ui_page == UI_PAGE_KKF_GPS_ROUTE)
@@ -1039,16 +1075,16 @@ void Menu_Select(void)
         }
         else if (s_ui_page == UI_PAGE_KKF_PARAM)
         {
-            // 1:MODE_SEL 2:EIGHT_TURN 3:E8_PROG 4:PID_CHANGE 5:PID_MODE
+            // 1:MODE_SEL 2:EIGHT_TURN 3:E8_PROG 4:PID_CHANGE 5:PID_MODE 6:CON_DBG
             if (KEY3_PRES == key)
             {
                 if (s_kkf_param_item > 1u) s_kkf_param_item--;
-                else s_kkf_param_item = 5u;
+                else s_kkf_param_item = 6u;
                 ips200_clear();
             }
             else if (KEY1_PRES == key)
             {
-                if (s_kkf_param_item < 5u) s_kkf_param_item++;
+                if (s_kkf_param_item < 6u) s_kkf_param_item++;
                 else s_kkf_param_item = 1u;
                 ips200_clear();
             }
@@ -1088,6 +1124,11 @@ void Menu_Select(void)
                     // PID_MODE：选择要编辑哪套 PID 参数
                     s_ui_page = UI_PAGE_KKF_PID_MODE_SELECT;
                     s_kkf_pid_mode_item = kkf_pid_mode_to_item((pid_mode_t)s_kkf_pid_mode_id);
+                    ips200_clear();
+                }
+                else if (s_kkf_param_item == 6u)
+                {
+                    s_ui_page = UI_PAGE_KKF_CON_DBG;
                     ips200_clear();
                 }
                 else
@@ -1239,6 +1280,15 @@ void Menu_Select(void)
             else if (KEY2_PRES == key)
             {
                 s_kkf_pid_mode_id = kkf_item_to_pid_mode(s_kkf_pid_mode_item);
+                s_ui_page = UI_PAGE_KKF_PARAM;
+                ips200_clear();
+            }
+        }
+        else if (s_ui_page == UI_PAGE_KKF_CON_DBG)
+        {
+            // 遥控器调试页：KEY4 返回参数页
+            if (KEY4_PRES == key)
+            {
                 s_ui_page = UI_PAGE_KKF_PARAM;
                 ips200_clear();
             }

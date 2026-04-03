@@ -261,7 +261,7 @@ void ttop_funtion_init(void)
     //imu660ra_init();            // 陀螺仪
     //wifi_spi_demo_init();       // WiFi-SPI TCP初始化
     small_driver_uart_init();       // 初始化电机
-
+	uart_receiver_init();          // 无线接收模块初始化
     //led_bzw_show_init();         // LED 状态显示模块初始化
 
     // 惯性导航：航迹推算模块初始化
