@@ -272,7 +272,15 @@ IFX_INTERRUPT(uart1_tx_isr, 0, UART1_TX_INT_PRIO)
 IFX_INTERRUPT(uart1_rx_isr, 0, UART1_RX_INT_PRIO)
 {
     interrupt_global_enable(0);                     // 开启中断嵌套
-    camera_uart_handler_1();                        // 摄像头串口通讯统一调用函数
+    // UART1 保持兼容：接收机模式走无线回调，其它场景走摄像头回调。
+    if (wireless_type == RECEIVER_UART)
+    {
+        wireless_module_uart_handler();
+    }
+    else
+    {
+        camera_uart_handler_1();                    // 摄像头串口通讯统一调用函数
+    }
 }
 
 // 串口2默认用于接收无线转串口模块
