@@ -148,7 +148,7 @@ void small_driver_uart_init(void)
 {
     uart_init(SMALL_DRIVER_UART, SMALL_DRIVER_BAUDRATE, SMALL_DRIVER_RX, SMALL_DRIVER_TX);      // 串口初始化
 
-    uart_rx_interrupt(SMALL_DRIVER_UART, 1);                                                    // 使能串口接收中断
+    //uart_rx_interrupt(SMALL_DRIVER_UART, 1);                                                    // 使能串口接收中断
 
     small_driver_init();                                                                        // 结构体清零初始化
 

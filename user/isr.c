@@ -254,9 +254,12 @@ IFX_INTERRUPT(uart0_rx_isr, 0, UART0_RX_INT_PRIO)
 {
     interrupt_global_enable(0);                     // 开启中断嵌套
 
+
+
 #if DEBUG_UART_USE_INTERRUPT                        // 如果启用了 debug 串口中断
         debug_interrupr_handler();                  // 调用 debug 串口接收处理函数 数据会被 debug 串口缓冲区读取
 #endif                                              // 如果修改了 DEBUG_UART_INDEX 宏定义 需要将对应的串口中断函数
+    
 }
 
 
@@ -295,8 +298,8 @@ IFX_INTERRUPT(uart2_tx_isr, 0, UART2_TX_INT_PRIO)
 IFX_INTERRUPT(uart2_rx_isr, 0, UART2_RX_INT_PRIO)
 {
     interrupt_global_enable(0);                     // 开启中断嵌套
-    wireless_module_uart_handler();                 // 无线模块统一调用函数
-
+    //uart_control_callback();                        // 小驱动板串口回调（UART2）
+    //wireless_module_uart_handler();
 
 
 }

@@ -232,7 +232,7 @@ void ttop_funtion_init(void)
 	pit_init(CCU61_CH0,1000);  //舵机pid+编码器的定时器
     pit_init(CCU60_CH1,2000);   // 2 ms 定时器，用于驱动姿态解算
     pwm_init(PWM_CH1, 300, 0);   //pwm
-    uart_init(UART_0, 460800, UART0_TX_P14_0, UART0_RX_P14_1);// UART0->现用于测试，后面会用于gps接收
+    //uart_init(UART_0, 460800, UART0_TX_P14_0, UART0_RX_P14_1);// UART0->现用于测试，后面会用于gps接收
 
     ips200_set_dir(IPS200_PORTAIT);//屏幕初始化
     ips200_set_color(RGB565_BLACK, RGB565_WHITE);
@@ -260,9 +260,9 @@ void ttop_funtion_init(void)
     imu660rx_init();            // 陀螺仪
     //imu660ra_init();            // 陀螺仪
     //wifi_spi_demo_init();       // WiFi-SPI TCP初始化
-    //small_driver_uart_init();       // 初始化电机
+    
 	uart_receiver_init();          // 无线接收模块初始化
-    //led_bzw_show_init();         // LED 状态显示模块初始化
+	small_driver_uart_init();       // 初始化电机
 
     // 惯性导航：航迹推算模块初始化
     ins_dr_init();
