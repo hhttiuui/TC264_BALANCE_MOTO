@@ -52,7 +52,7 @@ void ttop_funtion_mode_once_apply(void)
 	else if (funtion_kemu == 2u)// MODE2：变速
 	{		
 		PID_INIT_BY_MODE(PID_MODE_CASCADE_EX2);
-		ttop_speed_change_init();
+		ttop_speed_change_init(PID_MODE_CASCADE_EX2, PID_MODE_CASCADE_EX1);
 	}
 	else if (funtion_kemu == 3u)// MODE3：直线速度55
 	{
@@ -95,7 +95,8 @@ void ttop_funtion_mode_once_apply(void)
 	}
 	else if (funtion_kemu == 11u)// MODE11：预留
 	{
-		PID_INIT_BY_MODE(PID_MODE_CASCADE_EX1);
+		ttop_rc_control_init();
+		ttop_speed_change_init(PID_MODE_CASCADE_EX2, PID_MODE_CASCADE_EX1);
 	}
 	else if (funtion_kemu == 12u)// MODE12：预留
 	{
@@ -196,7 +197,8 @@ void ttop_pid_task_5ms(void)
 	}
 	else if(funtion_kemu == 11)// MODE11：预留
 	{
-		pid_timer_handler_by_mode(PID_MODE_CASCADE_EX1);
+		ttop_rc_control_task_5ms();
+		ttop_speed_change_task_5ms();
 	}
 	else if(funtion_kemu == 12)// MODE12：预留
 	{		
@@ -263,7 +265,7 @@ void ttop_funtion_init(void)
     
 	uart_receiver_init();          // 无线接收模块初始化
 	small_driver_uart_init();       // 初始化电机
-
+	ttop_rc_control_init();         // 遥控器控制模块初始化
     // 惯性导航：航迹推算模块初始化
     ins_dr_init();
 

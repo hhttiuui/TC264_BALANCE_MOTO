@@ -100,6 +100,7 @@ typedef struct
 	int16 motor_target_counts_5ms;
 } pid_mode_cfg_t;
 
+
 // 配置表条目数（与 pid_mode_t 的最后一个枚举值保持一致）
 #define PID_MODE_CFG_COUNT   (7u)
 
@@ -114,8 +115,15 @@ void PID_INIT_BY_MODE(pid_mode_t mode);
 // - 适合同一控制策略下（例如 CASCADE 组内）按速度切参。
 void PID_HOT_SWITCH_BY_MODE(pid_mode_t mode);
 
+// 动态 PID（cascade）参数接收接口：由外部传入实时 kp。
+void pid_dynamic_cascade_set_kp(float angle_kp, float rate_kp);
+
 // 按模式周期执行 PID（函数名不包含周期，外部按实际调度频率调用即可）
 void pid_timer_handler_by_mode(pid_mode_t mode);
+
+// 动态 PID 专用处理：固定走 位置+角度+角速度（cascade）链路。
+// 适用于外部按速度实时插值 kp 的场景。
+void pid_timer_handler_dynamic_cascade(pid_mode_t mode);
 
 float default_imu_to_target(float imu_g);
 

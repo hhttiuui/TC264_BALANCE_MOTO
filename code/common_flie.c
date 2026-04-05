@@ -373,6 +373,12 @@ static inline const pid_mode_cfg_t *pid_mode_cfg_get(pid_mode_t mode)
 	return &s_pid_mode_cfg[m];
 }
 
+void pid_dynamic_cascade_set_kp(float angle_kp, float rate_kp)
+{
+	pid_set_gains(&g_pid_angle, angle_kp, g_pid_angle.ki, g_pid_angle.kd);
+	pid_set_gains(&g_pid_rate, rate_kp, g_pid_rate.ki, g_pid_rate.kd);
+}
+
 static void pid_apply_gains(pid_t *pid, const pid_gains_cfg_t *cfg)
 {
 	pid_init_default(pid);
@@ -520,6 +526,28 @@ void pid_timer_handler_by_mode(pid_mode_t mode)
 
 		out = apply_deadzone(out, SERVO_OUT_DEADZONE);
 	}
+
+	ips_show_pid_out = out;
+	servo_output_cb(out);
+	count_pid++;
+}
+
+void pid_timer_handler_dynamic_cascade(pid_mode_t mode)
+{
+	// 动态 PID 专用：固定 cascade 控制链，kp 可由外部实时插值更新。
+	const pid_mode_cfg_t *cfg = pid_mode_cfg_get(mode);
+
+	float pitch_deg = (float)g_pitch_deg_cache;
+	float pitch_rate_dps_f = (float)g_pitch_rate_dps_f_cache;
+	float yaw_rel_deg = (float)g_yaw_rel_deg_cache;
+
+	// yaw PID -> pid_target
+	g_yaw_pid_out_deg = pid_compute_yaw_target_with_gate(cfg, pitch_deg, yaw_rel_deg);
+	pid_target = g_yaw_pid_out_deg;
+
+	float rate_sp_dps = pid_compute(&g_pid_angle, pid_target, pitch_deg, PID_TASK_DT_S);
+	float out = pid_compute(&g_pid_rate, rate_sp_dps, pitch_rate_dps_f, PID_TASK_DT_S);
+	out = apply_deadzone(out, SERVO_OUT_DEADZONE);
 
 	ips_show_pid_out = out;
 	servo_output_cb(out);

@@ -17,14 +17,21 @@
 extern "C" {
 #endif
 
-// 速度分档热切换模块初始化（建议上电或模式切换后调用一次）
-void ttop_speed_change_init(void);
+// 动态速度模块初始化：
+// - high_mode: 高速参数来源模式（例如 PID_MODE_CASCADE_EX2 / CASCADE3）
+// - low_mode : 低速参数来源模式（例如 PID_MODE_CASCADE_EX1 / CASCADE2）
+void ttop_speed_change_init(pid_mode_t high_mode, pid_mode_t low_mode);
 
 // 5ms 任务：根据编码器速度实时切换 PID 档位（调用 PID_HOT_SWITCH_BY_MODE）
 void ttop_speed_change_task_5ms(void);
 
 // 查询当前分档选择的 PID 模式（用于调试显示）
 pid_mode_t ttop_speed_change_get_mode(void);
+
+// 查询动态插值链路实时量（用于菜单调试显示）
+float ttop_speed_change_get_speed_abs_filt(void);
+float ttop_speed_change_get_angle_kp(void);
+float ttop_speed_change_get_rate_kp(void);
 
 
 

@@ -67,6 +67,11 @@ typedef struct
 
 extern uart_receiver_struct uart_receiver;                      // 串口接收机通道数据与状态
 
+// 调试计数：用于定位 FAIL 原因
+extern volatile uint32 uart_receiver_frame25_count;             // 收到25字节完整帧次数
+extern volatile uint32 uart_receiver_frame_ok_count;            // 帧头帧尾校验通过次数
+extern volatile uint32 uart_receiver_abnormal_count;            // 解析后被判定失控次数
+
 void uart_receiver_init(void);
 
 #endif

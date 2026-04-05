@@ -49,6 +49,9 @@
 #include "zf_device_uart_receiver.h"
 
 uart_receiver_struct    uart_receiver ;             // 串口接收机通道数据与状态
+volatile uint32 uart_receiver_frame25_count = 0;
+volatile uint32 uart_receiver_frame_ok_count = 0;
+volatile uint32 uart_receiver_abnormal_count = 0;
 
 uint8   uart_receiver_data[REV_DATA_LEN]  = {0};    // 接收器原始数据
 
@@ -93,6 +96,10 @@ static void uart_receiver_analysis (uart_receiver_struct *remote_data,uint8 * bu
     remote_data->channel[num++] = (buffer[6] >> 4 | buffer[7] << 4 ) & 0x07FF;
     remote_data->channel[num++] = (buffer[7] >> 7 | buffer[8] << 1 | buffer[9] << 9 ) & 0x07FF;
     remote_data->state = (SBUS_ABNORMAL_STATE == (buffer[23] & SBUS_ABNORMAL_STATE)) ? 0 : 1;
+    if (0u == remote_data->state)
+    {
+        uart_receiver_abnormal_count++;
+    }
     uart_receiver.finsh_flag  = 1;
 }
 
@@ -106,17 +113,33 @@ static void uart_receiver_analysis (uart_receiver_struct *remote_data,uint8 * bu
 void uart_receiver_callback(void)
 {
     static vuint8 length = 0;
+    uint8 byte_now;
 
     if (uart_receiver_interval_time() > 3000)
     {
         length = 0;
     }
-    uart_receiver_data[length++] = uart_read_byte(UART_RECEVIER_UART_INDEX);
-    if  ( (REV_DATA_LEN  == length)                                                                    // 如果帧长、帧头、帧尾满足协议
-        && (FRAME_STAR   == uart_receiver_data[0])
-        && (FRAME_END    == uart_receiver_data[24]))
+    byte_now = uart_read_byte(UART_RECEVIER_UART_INDEX);
+
+    // 越界保护：任何异常长度都立刻从新帧重新计数，避免内存踩踏导致系统卡死。
+    if (length >= REV_DATA_LEN)
     {
-        uart_receiver_analysis(&uart_receiver, uart_receiver_data);
+        length = 0;
+    }
+
+    uart_receiver_data[length++] = byte_now;
+
+    if (REV_DATA_LEN == length)
+    {
+        uart_receiver_frame25_count++;
+        if  ( (FRAME_STAR   == uart_receiver_data[0])                                                // 如果帧长、帧头、帧尾满足协议
+            && (FRAME_END    == uart_receiver_data[24]))
+        {
+            uart_receiver_frame_ok_count++;
+            uart_receiver_analysis(&uart_receiver, uart_receiver_data);
+        }
+        // 不论该帧是否有效，都从下一字节重新收帧。
+        length = 0;
     }
 }
 

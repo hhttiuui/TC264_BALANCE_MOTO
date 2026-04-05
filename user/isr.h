@@ -38,6 +38,8 @@
 
 #include "zf_common_headfile.h"
 
+extern volatile uint32 g_uart1_rx_isr_count;
+
 
 
 

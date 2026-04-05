@@ -99,9 +99,9 @@
 #define UART0_ER_INT_PRIO       12                  // 定义串口0错误中断优先级 优先级范围1-255 越大优先级越高 与平时使用的单片机不一样
 
 #define UART1_INT_SERVICE       IfxSrc_Tos_cpu0
-#define UART1_TX_INT_PRIO       13
-#define UART1_RX_INT_PRIO       14
-#define UART1_ER_INT_PRIO       15
+#define UART1_TX_INT_PRIO       37
+#define UART1_RX_INT_PRIO       38
+#define UART1_ER_INT_PRIO       39
 
 #define UART2_INT_SERVICE       IfxSrc_Tos_cpu0
 #define UART2_TX_INT_PRIO       16

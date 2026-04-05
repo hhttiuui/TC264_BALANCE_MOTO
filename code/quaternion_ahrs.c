@@ -43,21 +43,11 @@ static volatile uint32 s_yaw_stable_cnt = 0u;
 
 // ============================ Yaw unwrap (for yaw_rel) ============================
 // yaw_rel_deg 本身通常是 wrap 到 [-180,180) 的角度；这里把它解包成连续角。
-// 默认限幅到 ±720°（满足“记录正负720度”需求）。
-#ifndef AHRS_YAW_REL_UNWRAP_LIMIT_DEG
-#define AHRS_YAW_REL_UNWRAP_LIMIT_DEG   (720.0f)
-#endif
+// 这里不再做角度限幅，持续累计（更适合遥控长时间转向场景）。
 
 static float s_yaw_rel_unwrap_last_deg = 0.0f;
 static float s_yaw_rel_unwrap_deg = 0.0f;
 static uint8 s_yaw_rel_unwrap_inited = 0u;
-
-static inline float clamp_f(float x, float minv, float maxv)
-{
-    if (x > maxv) return maxv;
-    if (x < minv) return minv;
-    return x;
-}
 
 void ahrs_yaw_rel_unwrap_reset(float yaw_rel_deg)
 {
@@ -83,9 +73,6 @@ float ahrs_yaw_rel_unwrap_720_update_deg(float yaw_rel_deg)
     s_yaw_rel_unwrap_deg += dy;
     s_yaw_rel_unwrap_last_deg = yaw_rel_deg;
 
-    s_yaw_rel_unwrap_deg = clamp_f(s_yaw_rel_unwrap_deg,
-                                   -(float)AHRS_YAW_REL_UNWRAP_LIMIT_DEG,
-                                   (float)AHRS_YAW_REL_UNWRAP_LIMIT_DEG);
     return s_yaw_rel_unwrap_deg;
 }
 
@@ -123,6 +110,9 @@ void ahrs_yaw_zero_set(float yaw_deg)
     s_yaw_zero_deg = yaw_deg;
     s_yaw_zero_valid = 1u;
     s_yaw_stable_cnt = 0u;
+
+    // 置零时同步重置 unwrap，避免“yaw_rel 回到 0 但连续角跳到 360/720”
+    ahrs_yaw_rel_unwrap_reset(0.0f);
 }
 
 void ahrs_yaw_zero_clear(void)
@@ -130,6 +120,9 @@ void ahrs_yaw_zero_clear(void)
     s_yaw_zero_valid = 0u;
     s_yaw_stable_cnt = 0u;
     s_yaw_zero_deg = 0.0f;
+
+    // 清除置零状态时也把连续角状态复位到 0，保持行为可预期。
+    ahrs_yaw_rel_unwrap_reset(0.0f);
 }
 
 uint8 ahrs_yaw_zero_is_valid(void)

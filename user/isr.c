@@ -51,6 +51,7 @@ uint16 imu_imucount = 0;
 
 
 uint8_t ceshi_count = 0;
+volatile uint32 g_uart1_rx_isr_count = 0;
 
 
 IFX_INTERRUPT(cc60_pit_ch1_isr, 0, CCU6_0_CH1_ISR_PRIORITY)
@@ -275,6 +276,7 @@ IFX_INTERRUPT(uart1_tx_isr, 0, UART1_TX_INT_PRIO)
 IFX_INTERRUPT(uart1_rx_isr, 0, UART1_RX_INT_PRIO)
 {
     interrupt_global_enable(0);                     // 开启中断嵌套
+    g_uart1_rx_isr_count++;
     // UART1 保持兼容：接收机模式走无线回调，其它场景走摄像头回调。
     if (wireless_type == RECEIVER_UART)
     {

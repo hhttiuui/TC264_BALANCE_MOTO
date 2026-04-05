@@ -10,28 +10,6 @@
 #include "zf_common_headfile.h"
 #include "ttop_speed_change.h"
 
-// 速度分档（单位：encoder counts / 5ms，按绝对值比较）
-// 目标档位：
-// - PID_MODE_CASCADE_EX1 -> 140
-// - PID_MODE_CASCADE     -> 170
-// - PID_MODE_CASCADE_EX2 -> 200
-#ifndef TTOP_SPEED_CHANGE_V1
-#define TTOP_SPEED_CHANGE_V1            (140.0f)
-#endif
-
-#ifndef TTOP_SPEED_CHANGE_V2
-#define TTOP_SPEED_CHANGE_V2            (170.0f)
-#endif
-
-#ifndef TTOP_SPEED_CHANGE_V3
-#define TTOP_SPEED_CHANGE_V3            (200.0f)
-#endif
-
-// 切档滞回（counts/5ms）
-#ifndef TTOP_SPEED_CHANGE_HYS
-#define TTOP_SPEED_CHANGE_HYS           (10.0f)
-#endif
-
 // 速度低通滤波系数（0~1，越大越平滑）
 #ifndef TTOP_SPEED_CHANGE_LPF_ALPHA
 #define TTOP_SPEED_CHANGE_LPF_ALPHA     (0.80f)
@@ -41,55 +19,71 @@ typedef struct
 {
 	uint8_t inited;
 	pid_mode_t mode;
+	pid_mode_t mode_high;
+	pid_mode_t mode_low;
 	float speed_abs_filt;
+	float angle_kp_now;
+	float rate_kp_now;
 } ttop_speed_change_ctrl_t;
 
-static ttop_speed_change_ctrl_t s_spd = {0u, PID_MODE_CASCADE, 0.0f};
+static ttop_speed_change_ctrl_t s_spd = {0u, PID_MODE_CASCADE, PID_MODE_CASCADE_EX2, PID_MODE_CASCADE_EX1, 0.0f, 0.0f, 0.0f};
 
 static inline float ttop_absf_local(float x)
 {
 	return (x < 0.0f) ? -x : x;
 }
 
-static pid_mode_t ttop_speed_change_pick_mode(float speed_abs)
+static inline float ttop_clampf_local(float x, float lo, float hi)
 {
-	const float up_12 = 0.5f * ((float)TTOP_SPEED_CHANGE_V1 + (float)TTOP_SPEED_CHANGE_V2);
-	const float up_23 = 0.5f * ((float)TTOP_SPEED_CHANGE_V2 + (float)TTOP_SPEED_CHANGE_V3);
-	const float dn_21 = up_12 - (float)TTOP_SPEED_CHANGE_HYS;
-	const float dn_32 = up_23 - (float)TTOP_SPEED_CHANGE_HYS;
-
-	if (s_spd.mode == PID_MODE_CASCADE_EX1)
-	{
-		if (speed_abs >= up_12) return PID_MODE_CASCADE;
-		return PID_MODE_CASCADE_EX1;
-	}
-	if (s_spd.mode == PID_MODE_CASCADE)
-	{
-		if (speed_abs >= up_23) return PID_MODE_CASCADE_EX2;
-		if (speed_abs <= dn_21) return PID_MODE_CASCADE_EX1;
-		return PID_MODE_CASCADE;
-	}
-
-	// 当前为 PID_MODE_CASCADE_EX2
-	if (speed_abs <= dn_32) return PID_MODE_CASCADE;
-	return PID_MODE_CASCADE_EX2;
+	if (x < lo) return lo;
+	if (x > hi) return hi;
+	return x;
 }
 
-void ttop_speed_change_init(void)
+static inline float ttop_lerpf_local(float a, float b, float t)
+{
+	return a + (b - a) * t;
+}
+
+static inline const pid_mode_cfg_t *ttop_cfg_by_mode(pid_mode_t mode)
+{
+	int idx = (int)mode;
+	if (idx < 0 || idx >= (int)PID_MODE_CFG_COUNT)
+	{
+		idx = (int)PID_MODE_CASCADE;
+	}
+	return &s_pid_mode_cfg[idx];
+}
+
+static inline uint8_t ttop_mode_is_cascade(pid_mode_t mode)
+{
+	const pid_mode_cfg_t *cfg = ttop_cfg_by_mode(mode);
+	return (cfg->strategy == PID_STRAT_CASCADE) ? 1u : 0u;
+}
+
+void ttop_speed_change_init(pid_mode_t high_mode, pid_mode_t low_mode)
 {
 	s_spd.inited = 1u;
-	s_spd.mode = PID_MODE_CASCADE_EX1;
+	s_spd.mode = PID_MODE_CASCADE;
+
+	// 仅接受 cascade 策略作为高/低速参数来源，非法输入回退到 EX2/EX1。
+	s_spd.mode_high = ttop_mode_is_cascade(high_mode) ? high_mode : PID_MODE_CASCADE_EX2;
+	s_spd.mode_low = ttop_mode_is_cascade(low_mode) ? low_mode : PID_MODE_CASCADE_EX1;
 	s_spd.speed_abs_filt = 0.0f;
 
-	// 初始化时先同步一次到中速档参数。
-	PID_HOT_SWITCH_BY_MODE(s_spd.mode);
+	const pid_mode_cfg_t *cfg_low = ttop_cfg_by_mode(s_spd.mode_low);
+	s_spd.angle_kp_now = cfg_low->angle.kp;
+	s_spd.rate_kp_now = cfg_low->rate.kp;
+
+	// 使用低速模式作为动态链路的基础参数（限幅/ki/kd/yaw 等）。
+	PID_HOT_SWITCH_BY_MODE(s_spd.mode_low);
 }
 
 void ttop_speed_change_task_5ms(void)
 {
 	if (!s_spd.inited)
 	{
-		ttop_speed_change_init();
+		ttop_speed_change_init(PID_MODE_CASCADE_EX2, PID_MODE_CASCADE_EX1);
 	}
 
 	// 使用编码器 5ms 增量的绝对值作为速度量。
@@ -97,18 +91,58 @@ void ttop_speed_change_task_5ms(void)
 	s_spd.speed_abs_filt = (float)TTOP_SPEED_CHANGE_LPF_ALPHA * s_spd.speed_abs_filt +
 						  (1.0f - (float)TTOP_SPEED_CHANGE_LPF_ALPHA) * speed_abs_raw;
 
-	pid_mode_t next = ttop_speed_change_pick_mode(s_spd.speed_abs_filt);
-	if (next != s_spd.mode)
+	const pid_mode_cfg_t *cfg_low = ttop_cfg_by_mode(s_spd.mode_low);
+	const pid_mode_cfg_t *cfg_high = ttop_cfg_by_mode(s_spd.mode_high);
+
+	float v_low = (float)cfg_low->motor_target_counts_5ms;
+	float v_high = (float)cfg_high->motor_target_counts_5ms;
+	if (v_high <= v_low + 1e-6f)
 	{
-		s_spd.mode = next;
-		PID_HOT_SWITCH_BY_MODE(s_spd.mode);
+		v_low = 140.0f;
+		v_high = 200.0f;
 	}
 
-	// 使用与热切换一致的 mode 执行本周期 PID 计算。
-	pid_timer_handler_by_mode(s_spd.mode);
+	const float v_expand = 50.0f;
+	float v_lerp_low = v_low - v_expand;
+	float v_lerp_high = v_high + v_expand;
+	if (v_lerp_low < 0.0f)
+	{
+		v_lerp_low = 0.0f;
+	}
+	if (v_lerp_high <= v_lerp_low + 1e-6f)
+	{
+		v_lerp_high = v_lerp_low + 1.0f;
+	}
+
+	float alpha = ttop_clampf_local((s_spd.speed_abs_filt - v_lerp_low) / (v_lerp_high - v_lerp_low), 0.0f, 1.0f);
+	float angle_kp = ttop_lerpf_local(cfg_low->angle.kp, cfg_high->angle.kp, alpha);
+	float rate_kp = ttop_lerpf_local(cfg_low->rate.kp, cfg_high->rate.kp, alpha);
+	s_spd.angle_kp_now = angle_kp;
+	s_spd.rate_kp_now = rate_kp;
+
+	// 插值仅在 speed_change 模块内完成，common_flie 仅负责接收参数并执行调度。
+	pid_dynamic_cascade_set_kp(angle_kp, rate_kp);
+
+	// 动态 PID 专用处理（固定 cascade 链路）。
+	pid_timer_handler_dynamic_cascade(s_spd.mode_low);
 }
 
 pid_mode_t ttop_speed_change_get_mode(void)
 {
 	return s_spd.mode;
+}
+
+float ttop_speed_change_get_speed_abs_filt(void)
+{
+	return s_spd.speed_abs_filt;
+}
+
+float ttop_speed_change_get_angle_kp(void)
+{
+	return s_spd.angle_kp_now;
+}
+
+float ttop_speed_change_get_rate_kp(void)
+{
+	return s_spd.rate_kp_now;
 }

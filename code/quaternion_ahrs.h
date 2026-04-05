@@ -83,12 +83,12 @@ float ahrs_yaw_get_rel_deg(float yaw_deg);
 // 说明：
 // - yaw_rel_deg 通常是 wrap 到 [-180, 180) 的角度。
 // - 为了得到连续角（不会在 180/-180 跳变），这里提供 yaw_rel 的解包（unwrap）。
-// - 该连续角会被限幅到 [-720, +720]（可通过宏调整）。
+// - 该连续角不做限幅，会持续累计（适合长时间遥控转向）。
 
 // 复位 yaw_rel 连续角状态：建议在“延时置零完成/手动置零”后调用一次，避免首帧跳变。
 void ahrs_yaw_rel_unwrap_reset(float yaw_rel_deg);
 
-// 更新并获取 yaw_rel 连续角（deg，限幅到 ±720）
+// 更新并获取 yaw_rel 连续角（deg，连续累计不封顶）
 float ahrs_yaw_rel_unwrap_720_update_deg(float yaw_rel_deg);
 
 // 获取最近一次更新得到的 yaw_rel 连续角（deg）
