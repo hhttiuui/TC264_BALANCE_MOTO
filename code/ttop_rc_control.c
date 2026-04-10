@@ -83,12 +83,12 @@ void ttop_rc_control_init(void)
     s_rc_cfg.yaw.sensitivity = 0.2f;
     s_rc_cfg.yaw_rate_limit_deg_per_5ms = 8.0f;
 
-    s_rc_cfg.speed.in_min = 200.0f;
+    s_rc_cfg.speed.in_min = 800.0f;
     s_rc_cfg.speed.in_center = 800.0f;
     s_rc_cfg.speed.in_max = 1400.0f;
     s_rc_cfg.speed.out_min = 0.0f;
-    s_rc_cfg.speed.out_center = 140.0f;
-    s_rc_cfg.speed.out_max = 200.0f;
+    s_rc_cfg.speed.out_center = 0.0f;
+    s_rc_cfg.speed.out_max = 300.0f;
     s_rc_cfg.speed.sensitivity = 1.0f;
 }
 

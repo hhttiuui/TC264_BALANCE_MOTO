@@ -82,12 +82,34 @@ IFX_INTERRUPT(cc60_pit_ch1_isr, 0, CCU6_0_CH1_ISR_PRIORITY)
 uint16 enable_count = 0 , period_count = 0;
 uint8_t enable_flag = 0;
 
+uint16 period_2ms_count = 0,period_5ms_count = 0,period_10ms_count = 0;
+
 IFX_INTERRUPT(cc61_pit_ch0_isr, 0, CCU6_1_CH0_ISR_PRIORITY)
 {
     interrupt_global_enable(0);                     // 开启中断嵌套
     pit_clear_flag(CCU61_CH0);
 
     if(enable_count++>2000)enable_flag = 1;
+
+
+    //2ms陀螺仪+2ms角速度环+4ms角度环+8msyaw环
+    // if(enable_flag)
+    // {
+
+    //     if(period_2ms_count == 0)imu_task_handler_2ms();
+    //     if(period_2ms_count == 1)pid_timer_handler_multirate_2ms();
+
+    //     if(period_5ms_count == 0)Key_Sample();
+    //     if(period_10ms_count == 0)ttop_encoder_task_5ms();
+
+    //     period_2ms_count++;
+    //     if(period_2ms_count>=2)period_2ms_count = 0;
+    //     period_5ms_count++;
+    //     if(period_5ms_count>=5)period_5ms_count = 0;
+    //     period_10ms_count++;
+    //     if(period_10ms_count>=10)period_10ms_count = 0;
+
+    // }
 
     if(enable_flag)
     {
@@ -99,6 +121,8 @@ IFX_INTERRUPT(cc61_pit_ch0_isr, 0, CCU6_1_CH0_ISR_PRIORITY)
         period_count++;
         if(period_count>=5)period_count = 0;
     }
+
+
 
     //if (!pid_flag){pid_flag = 1; count_pid++;}//5MSPID 
     

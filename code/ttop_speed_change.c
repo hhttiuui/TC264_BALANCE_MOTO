@@ -127,22 +127,14 @@ void ttop_speed_change_task_5ms(void)
 	pid_timer_handler_dynamic_cascade(s_spd.mode_low);
 }
 
-pid_mode_t ttop_speed_change_get_mode(void)
-{
-	return s_spd.mode;
-}
+//返回当前分档选择的 PID 模式（用于调试显示）
+pid_mode_t ttop_speed_change_get_mode(void){return s_spd.mode;}
 
-float ttop_speed_change_get_speed_abs_filt(void)
-{
-	return s_spd.speed_abs_filt;
-}
+//返回当前滤波后的速度绝对值（用于调试显示）
+float ttop_speed_change_get_speed_abs_filt(void){return s_spd.speed_abs_filt;}
 
-float ttop_speed_change_get_angle_kp(void)
-{
-	return s_spd.angle_kp_now;
-}
+//返回当前动态插值后的 angle_kp（用于调试显示）
+float ttop_speed_change_get_angle_kp(void){return s_spd.angle_kp_now;}
 
-float ttop_speed_change_get_rate_kp(void)
-{
-	return s_spd.rate_kp_now;
-}
+//返回当前动态插值后的 rate_kp（用于调试显示）
+float ttop_speed_change_get_rate_kp(void){return s_spd.rate_kp_now;}

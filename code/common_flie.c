@@ -19,6 +19,11 @@ volatile uint8 pid_flag = 0;
 // PID/AHRS 调用周期（秒）：当前用5ms触发 
 #define PID_TASK_DT_S   (0.005f)
 
+// 新增多速率调度函数使用的独立 dt（外部每 2ms 调一次）
+#define PID_MR_RATE_DT_S    (0.002f)   // 角速度环：2ms
+#define PID_MR_ANGLE_DT_S   (0.004f)   // 角度环：4ms
+#define PID_MR_YAW_DT_S     (0.008f)   // yaw 外环：8ms
+
 // IMU/AHRS 调用周期（秒）：当前用2ms触发 
 #ifndef IMU_TASK_DT_S
 #define IMU_TASK_DT_S   (0.005f)
@@ -61,6 +66,9 @@ volatile float pid_target = 0.0f;
 // 注意：赛事功能模块（Ttop_funtion）需要直接修改该值来实现“转弯规划”
 volatile float g_yaw_pid_out_deg = 0.0f;
 volatile float g_yaw_target_deg = 0.0f;
+
+// 当前活动 PID 模式：由 PID_INIT_BY_MODE 设置，多速率调度函数按该模式执行。
+static pid_mode_t g_pid_active_mode = PID_MODE_CASCADE;
 
 // Mahony 四元数姿态解算状态
 static ahrs_mahony_t g_ahrs;
@@ -400,7 +408,14 @@ static void pid_apply_gains_hot(pid_t *pid, const pid_gains_cfg_t *cfg)
 
 void PID_INIT_BY_MODE(pid_mode_t mode)
 {
-	const pid_mode_cfg_t *cfg = pid_mode_cfg_get(mode);
+	uint16 mode_idx = (uint16)mode;
+	if (mode_idx >= (uint16)PID_MODE_CFG_COUNT)
+	{
+		mode_idx = 0u;
+	}
+	g_pid_active_mode = (pid_mode_t)mode_idx;
+
+	const pid_mode_cfg_t *cfg = pid_mode_cfg_get(g_pid_active_mode);
 
 	// 姿态解算初始化
 	ahrs_mahony_init(&g_ahrs, cfg->ahrs_kp, cfg->ahrs_ki);
@@ -481,6 +496,24 @@ static float pid_compute_yaw_target_with_gate(const pid_mode_cfg_t *cfg, float p
 	return pid_compute(&g_pid_yaw, g_yaw_target_deg, yaw_rel_deg, PID_TASK_DT_S);
 }
 
+static float pid_compute_yaw_target_with_gate_dt(const pid_mode_cfg_t *cfg, float pitch_deg, float yaw_rel_deg, float yaw_dt_s)
+{
+	static uint8 s_yaw_enable_dt = 1u;
+	float abs_pitch = fabsf(pitch_deg);
+
+	if (s_yaw_enable_dt)
+	{
+		if (abs_pitch > cfg->yaw_gate_off_abs_pitch_deg) s_yaw_enable_dt = 0u;
+	}
+	else
+	{
+		if (abs_pitch < cfg->yaw_gate_on_abs_pitch_deg) s_yaw_enable_dt = 1u;
+	}
+
+	(void)s_yaw_enable_dt;
+	return pid_compute(&g_pid_yaw, g_yaw_target_deg, yaw_rel_deg, yaw_dt_s);
+}
+
 void pid_timer_handler_by_mode(pid_mode_t mode)
 {
 	const pid_mode_cfg_t *cfg = pid_mode_cfg_get(mode);
@@ -552,4 +585,85 @@ void pid_timer_handler_dynamic_cascade(pid_mode_t mode)
 	ips_show_pid_out = out;
 	servo_output_cb(out);
 	count_pid++;
+}
+
+void pid_timer_handler_multirate_2ms(void)
+{
+	// 新框架：外部固定 2ms 调用本函数
+	// - 角速度环：每次调用执行（2ms）
+	// - 角度环：每 2 次执行（4ms）
+	// - yaw 外环：每 4 次执行（8ms）
+	const pid_mode_cfg_t *cfg = pid_mode_cfg_get(g_pid_active_mode);
+	static uint8 s_sched_cnt = 0u;
+	static float s_yaw_target_hold = 0.0f;
+	static float s_angle_out_hold = 0.0f;
+	static float s_rate_sp_hold = 0.0f;
+
+	float pitch_deg = (float)g_pitch_deg_cache;
+	float pitch_rate_dps_f = (float)g_pitch_rate_dps_f_cache;
+	float yaw_rel_deg = (float)g_yaw_rel_deg_cache;
+	uint8 run_angle = 0u;
+	uint8 run_yaw = 0u;
+
+	if ((s_sched_cnt & 0x01u) == 0u) run_angle = 1u;
+	if ((s_sched_cnt & 0x03u) == 0u) run_yaw = 1u;
+
+	if (run_yaw)
+	{
+		s_yaw_target_hold = pid_compute_yaw_target_with_gate_dt(cfg, pitch_deg, yaw_rel_deg, PID_MR_YAW_DT_S);
+	}
+	g_yaw_pid_out_deg = s_yaw_target_hold;
+	pid_target = s_yaw_target_hold;
+
+	if (cfg->strategy == PID_STRAT_CASCADE)
+	{
+		if (run_angle)
+		{
+			s_rate_sp_hold = pid_compute(&g_pid_angle, pid_target, pitch_deg, PID_MR_ANGLE_DT_S);
+		}
+
+		float out = pid_compute(&g_pid_rate, s_rate_sp_hold, pitch_rate_dps_f, PID_MR_RATE_DT_S);
+		out = apply_deadzone(out, SERVO_OUT_DEADZONE);
+		ips_show_pid_out = out;
+		servo_output_cb(out);
+	}
+	else if (cfg->strategy == PID_STRAT_ANGLE_ONLY)
+	{
+		if (run_angle)
+		{
+			s_angle_out_hold = pid_compute(&g_pid_angle, 0.0f, pitch_deg, PID_MR_ANGLE_DT_S);
+		}
+
+		float out = s_angle_out_hold + (1.5f) * pitch_rate_dps_f;
+		out = apply_deadzone(out, SERVO_OUT_DEADZONE);
+		ips_show_pid_out = out;
+		servo_output_cb(out);
+	}
+	else
+	{
+		if (run_angle)
+		{
+			s_angle_out_hold = pid_compute(&g_pid_angle_two, pid_target, pitch_deg, PID_MR_ANGLE_DT_S);
+		}
+
+		float out = s_angle_out_hold;
+		float damp = cfg->damp_k * pitch_rate_dps_f;
+		if (damp > cfg->damp_max) damp = cfg->damp_max;
+		if (damp < -cfg->damp_max) damp = -cfg->damp_max;
+		out += damp;
+
+		if (out > g_pid_angle_two.out_max) out = g_pid_angle_two.out_max;
+		if (out < g_pid_angle_two.out_min) out = g_pid_angle_two.out_min;
+
+		out = apply_deadzone(out, SERVO_OUT_DEADZONE);
+		ips_show_pid_out = out;
+		servo_output_cb(out);
+	}
+
+	count_pid++;
+	s_sched_cnt++;
+	if (s_sched_cnt >= 4u)
+	{
+		s_sched_cnt = 0u;
+	}
 }

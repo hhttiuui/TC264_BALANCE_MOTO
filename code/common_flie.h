@@ -125,6 +125,12 @@ void pid_timer_handler_by_mode(pid_mode_t mode);
 // 适用于外部按速度实时插值 kp 的场景。
 void pid_timer_handler_dynamic_cascade(pid_mode_t mode);
 
+// 多速率 PID 调度：外部按 2ms 调用
+// - 角速度环：2ms
+// - 角度环：4ms
+// - yaw 外环：8ms
+void pid_timer_handler_multirate_2ms(void);
+
 float default_imu_to_target(float imu_g);
 
 // 舵机清零/回中：对外接口

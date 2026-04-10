@@ -20,21 +20,9 @@ extern volatile uint8 encoder_flag;
 extern float show_yaw_deg;
 uint8 count_20ms;
 
-// // 前置声明：避免在定义前使用导致隐式声明/重定义
-// static inline uint8 ttop_yaw_delay_done(void);
-
-
 // ============================ 主周期任务调用接口 ============================
 
-//=======此函数用于判断初始化是否完成，然后再调用pid=======//
-// static inline uint8 ttop_yaw_delay_done(void)
-// {
-// 	const led_bzw_show_status_t *st = led_bzw_show_status_get();
-// 	return (st && st->yaw_delay_done) ? 1u : 0u;
-// }
-
 volatile uint8 funtion_kemu = 1,funtion_ready_flag;
-
 
 //=======按键切换初始化，funtion_kemu 发生变化，就允许对应模式的“初始化动作”再执行一次。=======//
 void ttop_funtion_mode_once_apply(void)
@@ -212,6 +200,72 @@ void ttop_pid_task_5ms(void)
 
 	
 }
+
+void ttop_funtion_new(void)
+{
+	if (!funtion_ready_flag) return;
+
+	// MODE1：直线速度200
+	if(funtion_kemu == 1){}
+
+	//变速
+	else if(funtion_kemu == 2){}
+	// MODE3：直线速度55
+	else if(funtion_kemu == 3){}
+	// MODE4：直线速度45
+	else if(funtion_kemu == 4){}
+	// MODE5：直线速度200+转弯
+	else if(funtion_kemu == 5)
+	{
+		if(encoder_get_demo5_count_total()>18000)
+		{			
+			ttop_eight2_task_5ms();
+		}
+
+	}
+	// MODE6：8字
+	else if(funtion_kemu == 6)
+	{
+		
+		if(eight_count++>300)eight_flag = 1; //延时一段时间
+		if(eight_flag)ttop_eight2_task_5ms();
+
+	}
+	// MODE7：
+	else if(funtion_kemu == 7){}
+	// MODE8：
+	else if(funtion_kemu == 8){}
+	// MODE9：惯导 - 示教录制
+	else if(funtion_kemu == 9)
+	{
+		// 录制任务：更新航迹推算 + 按距离记录航点
+		if(eight_count++>300)eight_flag = 1;
+		if(eight_flag)ins_path_record_task_5ms();
+
+
+	}
+	// MODE10：惯导 - 自动跟踪
+	else if(funtion_kemu == 10)
+	{
+		// 跟踪任务：更新航迹推算 + Pure Pursuit 计算目标航向 → 自动写 g_yaw_target_deg
+		if(eight_count++>300)eight_flag = 1; 
+		if(eight_flag)ins_path_follow_task_5ms();
+
+		
+	}
+	// MODE11：预留
+	else if(funtion_kemu == 11)
+	{
+		ttop_rc_control_task_5ms();
+		ttop_speed_change_task_5ms();
+	}
+	// MODE12：预留
+	else if(funtion_kemu == 12){}
+
+	else{		}
+
+}
+
 static void load_saved_route_points(void)
 {
     uint8 count = gps_saved_point_count;

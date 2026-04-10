@@ -44,6 +44,8 @@ void ttop_encoder_task_5ms(void);
 // 婊¤冻鏉′欢鏃惰嚜鍔ㄦ竻 pid_flag 骞舵墽琛屽師鏉ョ殑 if{} 鍐呭
 void ttop_pid_task_5ms(void);
 
+void ttop_funtion_new(void);
+
 static void load_saved_route_points(void);
 
 // ============================ 妯″紡鍒囨崲锛氱數鏈虹洰鏍囧�间竴娆℃�ц缃� ============================
