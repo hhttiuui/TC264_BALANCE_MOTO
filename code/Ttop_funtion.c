@@ -58,16 +58,16 @@ void ttop_funtion_mode_once_apply(void)
 	else if (funtion_kemu == 6u)// MODE6：8字
 	{
 		ttop_eight2_select_program(TTOP_EIGHT2_PROG_MAIN);
-		PID_INIT_BY_MODE(PID_MODE_DAMPED_THREE);
+		PID_INIT_BY_MODE(PID_MODE_DAMPED_FOUR);
 		ttop_eight2_init();
 	}
 	else if (funtion_kemu == 7u)// MODE7：
 	{
-		PID_INIT_BY_MODE(PID_MODE_DAMPED_FOUR);
+		PID_INIT_BY_MODE(PID_MODE_CASCADE_EX1);
 	}
 	else if (funtion_kemu == 8u)// MODE8：
 	{
-		PID_INIT_BY_MODE(PID_MODE_DAMPED_FOUR);
+		PID_INIT_BY_MODE(PID_MODE_CASCADE_EX2);
 	}
 	else if (funtion_kemu == 9u)// MODE9：惯导 - 示教录制
 	{
@@ -88,7 +88,7 @@ void ttop_funtion_mode_once_apply(void)
 	}
 	else if (funtion_kemu == 12u)// MODE12：预留
 	{
-		PID_INIT_BY_MODE(PID_MODE_CASCADE_EX2);
+		PID_INIT_BY_MODE(PID_MODE_DAMPED_FOUR);
 	}
 	else
 	{
@@ -159,11 +159,11 @@ void ttop_pid_task_5ms(void)
 	}
 	else if(funtion_kemu == 7)// MODE7：
 	{
-		pid_timer_handler_by_mode(PID_MODE_DAMPED_FOUR);
+		pid_timer_handler_by_mode(PID_MODE_CASCADE_EX1);
 	}
 	else if(funtion_kemu == 8)// MODE8：
 	{
-		pid_timer_handler_by_mode(PID_MODE_DAMPED_FOUR);
+		pid_timer_handler_by_mode(PID_MODE_CASCADE_EX2);
 	}
 	else if(funtion_kemu == 9)// MODE9：惯导 - 示教录制
 	{

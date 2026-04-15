@@ -37,6 +37,7 @@ static motor_pid_t g_motor_pid;
 
 // ============================ 调试/状态量 ============================
 volatile float motor_pid_out = 0.0f;
+volatile float motor_ff_out = 0.0f;
 volatile int16 motor_speed_raw_counts = 0;
 volatile float motor_speed_filtered_counts = 0.0f;
 volatile uint32 count_motor_pid = 0;
@@ -71,6 +72,27 @@ static void motor_pid_reset(void)
 // 占空比斜率限制参数（单位：百分比/秒），可由外部通过 setter 修改
 static float g_duty_slope_percent_per_s = 500.0f;
 
+// 速度前馈参数：u_ff = k_v * v_ref + k_s * sign(v_ref)
+static float g_motor_ff_k_s = 0.0f;
+static float g_motor_ff_k_v = -4.8f;
+
+static float motor_signf(float x)
+{
+    if (x > 0.0f) return 1.0f;
+    if (x < 0.0f) return -1.0f;
+    return 0.0f;
+}
+
+static float motor_compute_feedforward(float setpoint)
+{
+    const float sgn = motor_signf(setpoint);
+    if (sgn == 0.0f)
+    {
+        return 0.0f;
+    }
+    return g_motor_ff_k_v * setpoint + g_motor_ff_k_s * sgn;
+}
+
 // 外部接口：设置/获取占空比斜率限制
 void motor_set_duty_slope_limit_percent_per_s(float percent_per_s)
 {
@@ -80,6 +102,18 @@ void motor_set_duty_slope_limit_percent_per_s(float percent_per_s)
 float motor_get_duty_slope_limit_percent_per_s(void)
 {
     return g_duty_slope_percent_per_s;
+}
+
+void motor_set_feedforward_gains(float k_s, float k_v)
+{
+    g_motor_ff_k_s = k_s;
+    g_motor_ff_k_v = k_v;
+}
+
+void motor_get_feedforward_gains(float *k_s, float *k_v)
+{
+    if (k_s) *k_s = g_motor_ff_k_s;
+    if (k_v) *k_v = g_motor_ff_k_v;
 }
 
 // 斜率限幅函数：根据全局参数与上次输出限制当前 duty 的变化，返回限制后的 duty
@@ -134,9 +168,9 @@ void motor_pid_init(void)
     motor_set_target_counts_per_5ms(200);
     motor_pid_init_default(&g_motor_pid);
     // 默认增益；后续可考虑提供 setter 接口集中调参
-    g_motor_pid.kp = 25.0f;
-    g_motor_pid.ki = 70.0f;
-    g_motor_pid.kd = 0.0003f;
+    g_motor_pid.kp = 10.0f;
+    g_motor_pid.ki = 40.0f;
+    g_motor_pid.kd = 0.0f;
 
     // 输出限幅与积分限幅初始化（放这里以便集中配置）
     g_motor_pid.out_min = -5000.0f;  // 映射到 duty 的最小值
@@ -146,6 +180,7 @@ void motor_pid_init(void)
 
     motor_speed_filtered_counts = 0.0f;
     motor_pid_out = 0.0f;
+    motor_ff_out = 0.0f;
     motor_speed_raw_counts = 0;
     count_motor_pid = 0;
 }
@@ -221,9 +256,13 @@ void motor_control_task_5ms(void)
     float setpoint = (float)g_motor_target_counts;
     float measurement = motor_speed_filtered_counts;
 
-    // ============================ PID 计算 ============================
-    float out = -motor_pid_compute(&g_motor_pid, setpoint, measurement, MOTOR_PID_DT_S);
-    motor_pid_out = out;
+    // ============================ PID + 前馈 ============================
+    // 不改 PI 参数，只在原有反馈控制上叠加速度前馈。
+    float pid_out = -motor_pid_compute(&g_motor_pid, setpoint, measurement, MOTOR_PID_DT_S);
+    float ff_out = motor_compute_feedforward(setpoint);
+    float out = pid_out + ff_out;
+    motor_pid_out = pid_out;
+    motor_ff_out = ff_out;
 
     // ============================ 输出映射到占空比并发送 ============================
     int16 duty = (int16)roundf(out);

@@ -93,34 +93,36 @@ IFX_INTERRUPT(cc61_pit_ch0_isr, 0, CCU6_1_CH0_ISR_PRIORITY)
 
 
     //2ms陀螺仪+2ms角速度环+4ms角度环+8msyaw环
-    // if(enable_flag)
-    // {
-
-    //     if(period_2ms_count == 0)imu_task_handler_2ms();
-    //     if(period_2ms_count == 1)pid_timer_handler_multirate_2ms();
-
-    //     if(period_5ms_count == 0)Key_Sample();
-    //     if(period_10ms_count == 0)ttop_encoder_task_5ms();
-
-    //     period_2ms_count++;
-    //     if(period_2ms_count>=2)period_2ms_count = 0;
-    //     period_5ms_count++;
-    //     if(period_5ms_count>=5)period_5ms_count = 0;
-    //     period_10ms_count++;
-    //     if(period_10ms_count>=10)period_10ms_count = 0;
-
-    // }
-
     if(enable_flag)
     {
 
-        if(period_count == 0)ttop_encoder_task_5ms();
-        if(period_count == 1)Key_Sample();//ttop_key_task_5ms();
-        if(period_count == 2)imu_task_handler_2ms();
-        if(period_count == 3)ttop_pid_task_5ms();
-        period_count++;
-        if(period_count>=5)period_count = 0;
+        if(period_2ms_count == 0)imu_task_handler_2ms();
+        if(period_2ms_count == 1)pid_timer_handler_multirate_2ms();
+
+        if(period_5ms_count == 0)Key_Sample();
+        if(period_5ms_count == 1)ttop_funtion_new();
+   
+        if(period_10ms_count == 0)ttop_encoder_task_5ms();
+
+        period_2ms_count++;
+        if(period_2ms_count>=2)period_2ms_count = 0;
+        period_5ms_count++;
+        if(period_5ms_count>=5)period_5ms_count = 0;
+        period_10ms_count++;
+        if(period_10ms_count>=5)period_10ms_count = 0;
+
     }
+
+    // if(enable_flag)
+    // {
+
+    //     if(period_count == 0)ttop_encoder_task_5ms();
+    //     if(period_count == 1)Key_Sample();//ttop_key_task_5ms();
+    //     if(period_count == 2)imu_task_handler_2ms();
+    //     if(period_count == 3)ttop_pid_task_5ms();
+    //     period_count++;
+    //     if(period_count>=5)period_count = 0;
+    // }
 
 
 

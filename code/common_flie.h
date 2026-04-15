@@ -118,6 +118,9 @@ void PID_HOT_SWITCH_BY_MODE(pid_mode_t mode);
 // 动态 PID（cascade）参数接收接口：由外部传入实时 kp。
 void pid_dynamic_cascade_set_kp(float angle_kp, float rate_kp);
 
+// 运行时动态调整 Mahony kp（不重置姿态/四元数）。
+void pid_dynamic_set_ahrs_kp(float ahrs_kp);
+
 // 按模式周期执行 PID（函数名不包含周期，外部按实际调度频率调用即可）
 void pid_timer_handler_by_mode(pid_mode_t mode);
 

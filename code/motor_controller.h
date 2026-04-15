@@ -31,6 +31,10 @@ void motor_set_target_counts_per_5ms(int16 target_counts);
 void motor_set_duty_slope_limit_percent_per_s(float percent_per_s);
 float motor_get_duty_slope_limit_percent_per_s(void);
 
+// 设置/获取速度前馈参数：u_ff = k_v * v_ref + k_s * sign(v_ref)
+void motor_set_feedforward_gains(float k_s, float k_v);
+void motor_get_feedforward_gains(float *k_s, float *k_v);
+
 // 根据倾角自适应调整目标速度：
 // - threshold_deg: 倒下阈值（deg），超过则进入“救车加速”
 // - speed_fall: 超阈值时设置的目标速度（counts/5ms）
@@ -46,6 +50,7 @@ void motor_clear_speed(void);
 
 // 调试状态（可在 UI 中显示）
 extern volatile float motor_pid_out;             // PID 输出（映射到 duty）
+extern volatile float motor_ff_out;              // 前馈输出（映射到 duty）
 extern volatile int16 motor_speed_raw_counts;    // 原始编码器 delta
 extern volatile float motor_speed_filtered_counts; // 滤波后的速度
 extern volatile uint32 count_motor_pid;          // 调用计数

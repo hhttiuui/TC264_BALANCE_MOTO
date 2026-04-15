@@ -234,6 +234,22 @@ void ahrs_mahony_init(ahrs_mahony_t *s, float kp, float ki)
     s->integralFBz = 0.0f;
 }
 
+void ahrs_mahony_set_gains(ahrs_mahony_t *s, float kp, float ki, uint8 reset_integral)
+{
+    if (kp < 0.0f) kp = 0.0f;
+    if (ki < 0.0f) ki = 0.0f;
+
+    s->twoKp = 2.0f * kp;
+    s->twoKi = 2.0f * ki;
+
+    if (reset_integral)
+    {
+        s->integralFBx = 0.0f;
+        s->integralFBy = 0.0f;
+        s->integralFBz = 0.0f;
+    }
+}
+
 void ahrs_mahony_update_imu(ahrs_mahony_t *s,
                             float gx, float gy, float gz,
                             float ax, float ay, float az,

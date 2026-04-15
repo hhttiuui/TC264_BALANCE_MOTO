@@ -44,6 +44,14 @@ void  Key_init(void);        // 初始化
 void  Key_Sample(void);
 uint8 Key_Read(uint8 i);
 
+// 长按事件读取：按住达到阈值后返回 1（单次事件），读取后自动清零
+// - 阈值由 KEY_LONG_PRESS_TICKS 定义（单位：去抖后的稳定采样周期）
+// - 当前实现中稳定采样周期约 25ms（Key_Sample 每 5ms 调用，5 次成窗）
+#ifndef KEY_LONG_PRESS_TICKS
+#define KEY_LONG_PRESS_TICKS   (24u)   // 约 600ms
+#endif
+uint8 Key_ReadLongPress(uint8 i);
+
 extern volatile uint8 key_flag;
 
 #ifdef __cplusplus

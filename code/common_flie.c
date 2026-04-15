@@ -26,7 +26,7 @@ volatile uint8 pid_flag = 0;
 
 // IMU/AHRS 调用周期（秒）：当前用2ms触发 
 #ifndef IMU_TASK_DT_S
-#define IMU_TASK_DT_S   (0.005f)
+#define IMU_TASK_DT_S   (0.002f)
 #endif
 
 volatile uint8 imu_flag_2ms = 0;
@@ -211,7 +211,7 @@ float default_imu_to_target(float imu_g)
 // =======IMU 周期任务处理函数：在 2ms 定时器中调用=======
 void imu_task_handler_2ms(void)
 {
-	gpio_toggle_level(P21_2);
+	gpio_toggle_level(P22_1);
 	// 读取 IMU 数据
 	imu660rx_get_acc();
 	imu660rx_get_gyro();
@@ -239,7 +239,7 @@ void imu_task_handler_2ms(void)
 	show_pitch_deg = pitch_deg;
 	show_yaw_deg = yaw_rel_deg;
 	show_pitch_rate_dps_f = pitch_rate_dps_f;
-	gpio_toggle_level(P21_2);
+	gpio_toggle_level(P22_1);
 }
 
 // ============================================================================
@@ -387,6 +387,17 @@ void pid_dynamic_cascade_set_kp(float angle_kp, float rate_kp)
 	pid_set_gains(&g_pid_rate, rate_kp, g_pid_rate.ki, g_pid_rate.kd);
 }
 
+void pid_dynamic_set_ahrs_kp(float ahrs_kp)
+{
+	if (ahrs_kp < 0.0f) ahrs_kp = 0.0f;
+	s_pid_mode_cfg[(uint16)g_pid_active_mode].ahrs_kp = ahrs_kp;
+
+	ahrs_mahony_set_gains(&g_ahrs,
+						  s_pid_mode_cfg[(uint16)g_pid_active_mode].ahrs_kp,
+						  s_pid_mode_cfg[(uint16)g_pid_active_mode].ahrs_ki,
+						  0u);
+}
+
 static void pid_apply_gains(pid_t *pid, const pid_gains_cfg_t *cfg)
 {
 	pid_init_default(pid);
@@ -453,6 +464,9 @@ void PID_INIT_BY_MODE(pid_mode_t mode)
 void PID_HOT_SWITCH_BY_MODE(pid_mode_t mode)
 {
 	const pid_mode_cfg_t *cfg = pid_mode_cfg_get(mode);
+
+	// AHRS 增益热切换：不重置四元数与历史积分，避免姿态估计跳变。
+	ahrs_mahony_set_gains(&g_ahrs, cfg->ahrs_kp, cfg->ahrs_ki, 0u);
 
 	// yaw PID：所有模式都会用
 	pid_apply_gains_hot(&g_pid_yaw, &cfg->yaw);
@@ -589,6 +603,7 @@ void pid_timer_handler_dynamic_cascade(pid_mode_t mode)
 
 void pid_timer_handler_multirate_2ms(void)
 {
+	gpio_toggle_level(P22_0);
 	// 新框架：外部固定 2ms 调用本函数
 	// - 角速度环：每次调用执行（2ms）
 	// - 角度环：每 2 次执行（4ms）
@@ -666,4 +681,5 @@ void pid_timer_handler_multirate_2ms(void)
 	{
 		s_sched_cnt = 0u;
 	}
+	gpio_toggle_level(P22_0);
 }

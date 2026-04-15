@@ -36,6 +36,10 @@ typedef struct
 // 初始化：kp/ki 为“Mahony增益”（经验：kp 0.5~5，ki 0~0.1，视噪声/漂移而定）
 void ahrs_mahony_init(ahrs_mahony_t *s, float kp, float ki);
 
+// 运行时更新增益：默认不重置积分项，避免热切参时出现突变。
+// reset_integral!=0 时会清零 integralFB*。
+void ahrs_mahony_set_gains(ahrs_mahony_t *s, float kp, float ki, uint8 reset_integral);
+
 // 更新：输入 gyro(rad/s) 与 acc(任意等比例单位)，dt(s)
 void ahrs_mahony_update_imu(ahrs_mahony_t *s,
                             float gx, float gy, float gz,
