@@ -134,6 +134,27 @@ static inline float ttop_limit_slew(float current, float target, float max_delta
 	return target;
 }
 
+static inline uint8 ttop_eight2_is_hold_prev_seg(const volatile ttop_eight2_seg_t *seg)
+{
+	return (seg->target_rel_deg == 0.0f && seg->rate_dps == 0.0f) ? 1u : 0u;
+}
+
+// 0,0 作为“占位段”时，目标角继承最近一个非占位段的目标角。
+static float ttop_eight2_resolve_target_rel_deg(uint16 seg_idx)
+{
+	int32 i;
+	for (i = (int32)seg_idx; i >= 0; i--)
+	{
+		const volatile ttop_eight2_seg_t *seg = &s_eight2_prog_active[(uint16)i];
+		if (!ttop_eight2_is_hold_prev_seg(seg))
+		{
+			return seg->target_rel_deg;
+		}
+	}
+
+	return 0.0f;
+}
+
 void ttop_eight2_init(void)
 {
 	s_eight2.started = 0u;
@@ -207,12 +228,13 @@ uint8 ttop_eight2_task_5ms(void)
 
 	// 取当前段（volatile 段表：避免被编译器缓存，允许上层运行时修改）
 	const volatile ttop_eight2_seg_t *seg = &s_eight2_prog_active[s_eight2.seg_idx];
+	float target_rel_deg = ttop_eight2_resolve_target_rel_deg(s_eight2.seg_idx);
 	float rate_dps = seg->rate_dps;
 	if (rate_dps <= 0.0f) rate_dps = (float)TTOP_EIGHT2_DEFAULT_RATE_DPS;
 	float max_delta = rate_dps * ((float)TTOP_TURN_DT_MS * 0.001f);
 
 	// 本段目标：绝对目标 = base0 + 目标偏移
-	s_eight2.yaw_target_abs_deg = s_eight2.base0_yaw_deg + seg->target_rel_deg;
+	s_eight2.yaw_target_abs_deg = s_eight2.base0_yaw_deg + target_rel_deg;
 
 	// 限速平滑逼近
 	s_eight2.yaw_out_deg = ttop_limit_slew(s_eight2.yaw_out_deg, s_eight2.yaw_target_abs_deg, max_delta);

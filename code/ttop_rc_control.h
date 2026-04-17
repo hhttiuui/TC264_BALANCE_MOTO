@@ -35,6 +35,7 @@ typedef struct
 void ttop_rc_control_init(void);
 void ttop_rc_control_set_config(const ttop_rc_control_cfg_t *cfg);
 const ttop_rc_control_cfg_t *ttop_rc_control_get_config(void);
+void ttop_rc_control_emergency_stop_now(void);
 void ttop_rc_control_task_5ms(void);
 
 #ifdef __cplusplus

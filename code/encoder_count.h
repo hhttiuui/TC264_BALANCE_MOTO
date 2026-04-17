@@ -9,7 +9,7 @@
 
 #ifndef CODE_ENCODER_COUNT_H_
 #define CODE_ENCODER_COUNT_H_
-
+#include "zf_common_headfile.h"
 #include <stdint.h>
 
 void encoder_tim5_demo_init(void);

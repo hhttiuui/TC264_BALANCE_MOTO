@@ -169,7 +169,7 @@ void motor_pid_init(void)
     motor_pid_init_default(&g_motor_pid);
     // 默认增益；后续可考虑提供 setter 接口集中调参
     g_motor_pid.kp = 10.0f;
-    g_motor_pid.ki = 40.0f;
+    g_motor_pid.ki = 30.0f;
     g_motor_pid.kd = 0.0f;
 
     // 输出限幅与积分限幅初始化（放这里以便集中配置）

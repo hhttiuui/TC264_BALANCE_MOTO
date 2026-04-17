@@ -17,6 +17,8 @@ extern "C" {
 #include "zf_common_headfile.h"
 void User_Interface(void);
 void Menu_Select(void);
+void Menu_StartAll(void);
+void Menu_ResetAll(void);
 
 extern float ips_show_pid_out;
 

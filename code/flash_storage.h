@@ -47,6 +47,16 @@ uint8 flash_storage_save_eight2_prog_ex1(void);
 uint8 flash_storage_save_eight2_prog_ex2(void);
 
 // ============================================================================
+// Flash 参数存储 —— kemu1 固定 5 段配置
+//
+// 持久化内容：
+// - g_ttop_kemu1_counts_per_meter
+// - g_ttop_kemu1_seg_table[5]（每段 meters/speed/turn_prog_id）
+// ============================================================================
+uint8 flash_storage_load_kemu1_cfg(void);
+uint8 flash_storage_save_kemu1_cfg(void);
+
+// ============================================================================
 // Flash 参数存储 —— 惯导航点表（INS Path）
 //
 // 说明：

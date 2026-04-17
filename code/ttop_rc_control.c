@@ -11,12 +11,20 @@
 
 #include "zf_common_headfile.h"
 #include "ttop_rc_control.h"
+#include "Menu.h"
 
 static ttop_rc_control_cfg_t s_rc_cfg;
 static float s_rc_speed_target_out = 0.0f;
+static unsigned char s_rc_ch4_reset_latched = 0u;
+static unsigned char s_rc_ch4_start_latched = 0u;
+static unsigned char s_rc_emergency_active = 0u;
 
 #ifndef TTOP_RC_SPEED_SLEW_COUNTS_PER_5MS
 #define TTOP_RC_SPEED_SLEW_COUNTS_PER_5MS   (3.0f)  //1f锛氭煍鍜岋紝鍝嶅簲閫熷害鎱�  2~3f锛氶�備腑锛屽搷搴旈�熷害閫備腑  4~5f锛氬揩閫燂紝鍝嶅簲閫熷害蹇紝绋冲畾鎬у樊
+#endif
+
+#ifndef TTOP_RC_LOW_SPEED_RUN_COUNTS_PER_5MS
+#define TTOP_RC_LOW_SPEED_RUN_COUNTS_PER_5MS (120.0f)
 #endif
 
 static inline float ttop_rc_clampf(float x, float lo, float hi)
@@ -86,7 +94,7 @@ static int16 ttop_rc_map_ch1_to_speed_counts(float ch1)
     // 我们强制：只要油门超了一点点(比如10)，就立刻给到一个稳定的保底速度(比如80)
     // 跨过危险起步区。
     float startup_threshold = 10.0f; // 起步推杆阈值
-    float base_speed = 80.0f;        // 稳定的最低起步速度
+    float base_speed = (float)TTOP_RC_LOW_SPEED_RUN_COUNTS_PER_5MS; // 稳定的最低起步速度
 
     if (speed > startup_threshold && speed < base_speed)
     {
@@ -131,6 +139,44 @@ const ttop_rc_control_cfg_t *ttop_rc_control_get_config(void)
     return &s_rc_cfg;
 }
 
+void ttop_rc_control_emergency_stop_now(void)
+{
+    int16 ch4 = uart_receiver.channel[3];
+
+    // CH4 一键复位：
+    // - 150~250：触发一次 reset，并进入急停态
+    // - 1750~1850：触发一次 start，并退出急停态
+    // - 950~1050：不操作，退出急停态并清除锁存，允许下一次触发
+    if ((ch4 >= 150) && (ch4 <= 250))
+    {
+        if (!s_rc_ch4_reset_latched)
+        {
+            Menu_ResetAll();
+            s_rc_ch4_reset_latched = 1u;
+        }
+
+        s_rc_emergency_active = 1u;
+        s_rc_speed_target_out = 0.0f;
+        //motor_set_target_counts_per_5ms(0);
+    }
+    else if ((ch4 >= 1750) && (ch4 <= 1850))
+    {
+        if (!s_rc_ch4_start_latched)
+        {
+            Menu_StartAll();
+            s_rc_ch4_start_latched = 1u;
+        }
+
+        s_rc_emergency_active = 0u;
+    }
+    else if ((ch4 >= 950) && (ch4 <= 1050))
+    {
+        s_rc_ch4_reset_latched = 0u;
+        s_rc_ch4_start_latched = 0u;
+        s_rc_emergency_active = 0u;
+    }
+}
+
 void ttop_rc_control_task_5ms(void)
 {
     // 閬ユ帶鍣ㄦ湭灏辩华鎴栧け鎺ф椂涓嶆洿鏂版帶鍒堕噺銆�
@@ -148,6 +194,15 @@ void ttop_rc_control_task_5ms(void)
 
     if (yaw_rate_lim < 0.0f) yaw_rate_lim = -yaw_rate_lim;
 
+    // CH4 急停态下，持续屏蔽本周期控制输出（CH4 判定已移到 emergency_stop 函数）
+    if (s_rc_emergency_active)
+    {
+        s_rc_speed_target_out = 0.0f;
+        motor_set_target_counts_per_5ms(0);
+        uart_receiver.finsh_flag = 0u;
+        return;
+    }
+
     // 【修改点 3】低速转向衰减
     // 当车速极低时（甚至0速），强烈打方向容易直接破坏平衡倒车（因为没有足够前向稳定和陀螺效应）
     // 所以在低速时，让它打方向的反应变“迟钝”一点。
@@ -155,9 +210,9 @@ void ttop_rc_control_task_5ms(void)
     if(current_speed_abs < 0) current_speed_abs = -current_speed_abs;
 
     float yaw_attenuation = 1.0f; // 满舵
-    if (current_speed_abs < 40.0f) {
+    if (current_speed_abs < ((float)TTOP_RC_LOW_SPEED_RUN_COUNTS_PER_5MS * 0.4f)) {
         yaw_attenuation = 0.2f; // 极低速，只有 20% 舵量
-    } else if (current_speed_abs < 100.0f) {
+    } else if (current_speed_abs < (float)TTOP_RC_LOW_SPEED_RUN_COUNTS_PER_5MS) {
         yaw_attenuation = 0.5f; // 起步初段，一半舵量
     }
 

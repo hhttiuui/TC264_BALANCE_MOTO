@@ -52,7 +52,8 @@ void ttop_funtion_mode_once_apply(void)
 	}
 	else if (funtion_kemu == 5u)// MODE5：直线速度200+转弯
 	{		
-		ttop_eight2_select_program(TTOP_EIGHT2_PROG_EX1);
+		ttop_kemu1_init();
+		ttop_speed_change_init(PID_MODE_CASCADE_EX2, PID_MODE_CASCADE_EX1);
 		PID_INIT_BY_MODE(PID_MODE_CASCADE);
 	}
 	else if (funtion_kemu == 6u)// MODE6：8字
@@ -71,13 +72,15 @@ void ttop_funtion_mode_once_apply(void)
 	}
 	else if (funtion_kemu == 9u)// MODE9：惯导 - 示教录制
 	{
-		PID_INIT_BY_MODE(PID_MODE_DAMPED_THREE);	
+		ttop_rc_control_init();
+		ttop_speed_change_init(PID_MODE_CASCADE_EX2, PID_MODE_CASCADE_EX1);	
 		ins_dr_init();// 初始化航迹推算 + 路径录制
 		ins_path_record_init();
 	}
 	else if (funtion_kemu == 10u)// MODE10：惯导 - 自动跟踪
 	{
-		PID_INIT_BY_MODE(PID_MODE_DAMPED_THREE);		
+		ttop_rc_control_init();
+		ttop_speed_change_init(PID_MODE_CASCADE_EX2, PID_MODE_CASCADE_EX1);		
 		ins_dr_init();// 初始化航迹推算
 		ins_path_follow_init();// 初始化跟踪控制器
 	}
@@ -171,8 +174,11 @@ void ttop_pid_task_5ms(void)
 		if(eight_count++>300)eight_flag = 1;
 		if(eight_flag)ins_path_record_task_5ms();
 
+		ttop_rc_control_task_5ms();
+		ttop_speed_change_task_5ms();
+
 		// PID 照常运行（保持平衡/可控）
-		pid_timer_handler_by_mode(PID_MODE_DAMPED_THREE);
+		//pid_timer_handler_by_mode(PID_MODE_DAMPED_THREE);
 	}
 	else if(funtion_kemu == 10)// MODE10：惯导 - 自动跟踪
 	{
@@ -196,6 +202,7 @@ void ttop_pid_task_5ms(void)
 	{
 		// 未选择/其它值：不输出
 	}
+	ttop_rc_control_emergency_stop_now();
 	gpio_toggle_level(P21_2);
 
 	
@@ -203,6 +210,8 @@ void ttop_pid_task_5ms(void)
 
 void ttop_funtion_new(void)
 {
+	// CH4 的急停/启动判断需要在任何状态下都可用，必须放在 ready 早退之前。
+	ttop_rc_control_emergency_stop_now();
 	if (!funtion_ready_flag) return;
 
 	// MODE1：直线速度200
@@ -217,10 +226,9 @@ void ttop_funtion_new(void)
 	// MODE5：直线速度200+转弯
 	else if(funtion_kemu == 5)
 	{
-		if(encoder_get_demo5_count_total()>18000)
-		{			
-			ttop_eight2_task_5ms();
-		}
+		ttop_kemu1_task_5ms();
+		ttop_speed_change_task_5ms();
+
 
 	}
 	// MODE6：8字
@@ -241,7 +249,8 @@ void ttop_funtion_new(void)
 		// 录制任务：更新航迹推算 + 按距离记录航点
 		if(eight_count++>300)eight_flag = 1;
 		if(eight_flag)ins_path_record_task_5ms();
-
+		ttop_rc_control_task_5ms();
+		ttop_speed_change_task_5ms();
 
 	}
 	// MODE10：惯导 - 自动跟踪
@@ -250,7 +259,8 @@ void ttop_funtion_new(void)
 		// 跟踪任务：更新航迹推算 + Pure Pursuit 计算目标航向 → 自动写 g_yaw_target_deg
 		if(eight_count++>300)eight_flag = 1; 
 		if(eight_flag)ins_path_follow_task_5ms();
-
+		ttop_rc_control_task_5ms();
+		ttop_speed_change_task_5ms();
 		
 	}
 	// MODE11：预留
@@ -263,7 +273,6 @@ void ttop_funtion_new(void)
 	else if(funtion_kemu == 12){}
 
 	else{		}
-
 }
 
 static void load_saved_route_points(void)
@@ -305,7 +314,9 @@ void ttop_funtion_init(void)
     (void)flash_storage_load_eight2_prog();
 	(void)flash_storage_load_eight2_prog_ex1();
 	(void)flash_storage_load_eight2_prog_ex2();
+	(void)flash_storage_load_kemu1_cfg();
 	(void)flash_storage_load_ins_path();
+	(void)flash_storage_load_kemu1_cfg();
 
 	// 舵机 PID 初始化：按当前模式（funtion_kemu）初始化一次
 	// funtion_kemu 与菜单模式对齐：1..12；PID_INIT_BY_MODE 使用 pid_mode_t
