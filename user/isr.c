@@ -35,6 +35,7 @@
 
 #include "isr_config.h"
 #include "isr.h"
+#include "gps_nav.h"
 
 extern int count_pid;
 extern volatile uint8 pid_flag;
@@ -81,6 +82,7 @@ IFX_INTERRUPT(cc60_pit_ch1_isr, 0, CCU6_0_CH1_ISR_PRIORITY)
 
 uint16 enable_count = 0 , period_count = 0;
 uint8_t enable_flag = 0;
+static uint8_t s_gps_nav_div20 = 0u;
 
 uint16 period_2ms_count = 0,period_5ms_count = 0,period_10ms_count = 0;
 
@@ -90,6 +92,12 @@ IFX_INTERRUPT(cc61_pit_ch0_isr, 0, CCU6_1_CH0_ISR_PRIORITY)
     pit_clear_flag(CCU61_CH0);
 
     if(enable_count++>2000)enable_flag = 1;
+
+    if(gnss_flag)
+    {
+        gnss_flag = 0;
+        gnss_data_parse();           //开始解析数据
+    }    
 
 
     //2ms陀螺仪+2ms角速度环+4ms角度环+8msyaw环
@@ -110,6 +118,12 @@ IFX_INTERRUPT(cc61_pit_ch0_isr, 0, CCU6_1_CH0_ISR_PRIORITY)
         if(period_5ms_count>=5)period_5ms_count = 0;
         period_10ms_count++;
         if(period_10ms_count>=5)period_10ms_count = 0;
+
+        if(++s_gps_nav_div20 >= 20u)
+        {
+            s_gps_nav_div20 = 0u;
+            gps_nav_task_100ms();
+        }
 
     }
 

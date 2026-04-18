@@ -20,9 +20,11 @@
 #include "common_flie.h"
 #include "ttop_speed_change.h"
 #include "ttop_kemu1.h"
+#include "ttop_kemu3.h"
 #include "ins_dead_reckoning.h"
 #include "ins_path_follow.h"
 #include "gps_display.h"
+#include "gps_nav.h"
 
 // =========================
 // 菜单：扣扣飞车
@@ -190,6 +192,8 @@ static volatile uint8 s_kkf_kemu1_item = 0u; // 0=counts_per_meter, 1..5=seg0..4
 
 // 模式：1~12（与顶层 funtion_kemu 对齐）
 static volatile uint8 s_kkf_mode = 1u;
+// GPS 导航使能：ON 时 START 会启用 gps_nav；OFF 时 START 不启用
+static volatile uint8 s_kkf_gps_nav_enable = 0u;
 
 // 与顶层调度融合：菜单直接接管模式/ready/清零等动作
 extern volatile uint8 eight_flag;
@@ -207,7 +211,7 @@ static const char *kkf_mode_str(uint8 mode)
         case 4u: return "MODE 4 45";
         case 5u: return "MODE 5 200+T";
         case 6u: return "MODE 6 8-TURN";
-        case 7u: return "MODE 7";
+        case 7u: return "MODE 7 K3";
         case 8u: return "MODE 8";
         case 9u: return "MODE 9 INS-REC";
         case 10u: return "MODE10 INS-TRK";
@@ -215,6 +219,11 @@ static const char *kkf_mode_str(uint8 mode)
         case 12u: return "MODE12";
         default: return "MODE 1";
     }
+}
+
+static const char *kkf_gps_nav_sw_str(void)
+{
+    return (s_kkf_gps_nav_enable != 0u) ? "ON" : "OFF";
 }
 
 static void kkf_draw_signature_bottom(void)
@@ -254,23 +263,25 @@ static void kkf_main_draw(void)
     ips200_show_string(16, 2 * 15, "START");
     ips200_show_string(16, 3 * 15, "RESET");
     ips200_show_string(16, 4 * 15, "CLEAR");
-    ips200_show_string(16, 5 * 15, "GPS_DBG");
-    ips200_show_string(16, 6 * 15, "STATE:");
-    ips200_show_string(16 * 6, 6 * 15, funtion_ready_flag ? "RUN" : "STOP");
-    ips200_show_string(16, 7 * 15, "MODE:");
-    ips200_show_string(16 * 6, 7 * 15, (char *)kkf_mode_str(s_kkf_mode));
-    ips200_show_string(16, 8 * 15, "yaw:");
-    ips200_show_float(16 * 6, 8 * 15, show_yaw_deg, 8, 2);//g_yaw_target_deg，show_yaw_deg
-    ips200_show_string(16, 9 * 15, "t_yaw:");
-    ips200_show_float(16 * 6, 9 * 15, g_yaw_target_deg, 8, 2);//eight_count
-    ips200_show_string(16, 10 * 15, "pitch:");
-    ips200_show_float(16 * 6, 10 * 15, show_pitch_deg, 8, 2);
-    ips200_show_string(16, 11 * 15, "SPD:");
-    ips200_show_int(16 * 6, 11 * 15, motor_speed_raw_counts, 6);
+    ips200_show_string(16, 5 * 15, "GPS:");
+    ips200_show_string(16 * 6, 5 * 15, (char *)kkf_gps_nav_sw_str());
+    ips200_show_string(16, 6 * 15, "GPS_DBG");
+    ips200_show_string(16, 7 * 15, "STATE:");
+    ips200_show_string(16 * 6, 7 * 15, funtion_ready_flag ? "RUN" : "STOP");
+    ips200_show_string(16, 8 * 15, "MODE:");
+    ips200_show_string(16 * 6, 8 * 15, (char *)kkf_mode_str(s_kkf_mode));
+    ips200_show_string(16, 9 * 15, "yaw:");
+    ips200_show_float(16 * 6, 9 * 15, show_yaw_deg, 8, 2);//g_yaw_target_deg，show_yaw_deg
+    ips200_show_string(16, 10 * 15, "t_yaw:");
+    ips200_show_float(16 * 6, 10 * 15, g_yaw_target_deg, 8, 2);//eight_count
+    ips200_show_string(16, 11 * 15, "pitch:");
+    ips200_show_float(16 * 6, 11 * 15, show_pitch_deg, 8, 2);
+    ips200_show_string(16, 12 * 15, "SPD:");
+    ips200_show_int(16 * 6, 12 * 15, motor_speed_raw_counts, 6);
 
-    ips200_show_string(16, 12 * 15, "xy:");
-    ips200_show_float(16 * 3, 12 * 15, ins_dr_get_pos_x(), 2, 3);
-    ips200_show_float(16 * 8, 12 * 15, ins_dr_get_pos_y(), 2, 3);
+    ips200_show_string(16, 13 * 15, "xy:");
+    ips200_show_float(16 * 3, 13 * 15, ins_dr_get_pos_x(), 2, 3);
+    ips200_show_float(16 * 8, 13 * 15, ins_dr_get_pos_y(), 2, 3);
 
     ips200_show_string(16, 14 * 15, "g_ins_path");
 
@@ -669,7 +680,7 @@ static void kkf_mode_select_draw(void)
     ips200_show_string(16, 4 * 15, "MODE 4 45");
     ips200_show_string(16, 5 * 15, "MODE 5 200+T");
     ips200_show_string(16, 6 * 15, "MODE 6 8-TURN");
-    ips200_show_string(16, 7 * 15, "MODE 7");
+    ips200_show_string(16, 7 * 15, "MODE 7 K3");
     ips200_show_string(16, 8 * 15, "MODE 8");
     ips200_show_string(16, 9 * 15, "MODE 9 INS-REC");
     ips200_show_string(16, 10 * 15, "MODE10 INS-TRK");
@@ -857,6 +868,8 @@ static void kkf_kemu1_adjust_counts_per_meter(int8 dir)
 #define KKF_PID_LONG_PRESS_EXTRA_STEPS   (50u)
 // KEMU1 编辑页长按加速：每次长按事件按短按步进执行 50 次
 #define KKF_KEMU1_LONG_PRESS_EXTRA_STEPS (50u)
+// 八字段表编辑页长按加速：每次长按事件按短按步进执行 50 次
+#define KKF_EIGHT_TURN_LONG_PRESS_EXTRA_STEPS (50u)
 
 // // 旧版菜单显示控制/状态信息
 // volatile uint8 menu_deep=1;     
@@ -893,6 +906,15 @@ void Menu_StartAll(void)
     ttop_eight2_reset_now();
     eight_flag = 0u;
     eight_count = 0u;
+
+    if (s_kkf_gps_nav_enable != 0u)
+    {
+        gps_nav_start();
+    }
+    else
+    {
+        gps_nav_stop();
+    }
 }
 
 void Menu_ResetAll(void)
@@ -905,6 +927,7 @@ void Menu_ResetAll(void)
     ins_dr_init();
     ins_path_follow_init();
     ttop_kemu1_init();
+    gps_nav_init();
     eight_flag = 0u;
     eight_count = 0u;
     funtion_ready_flag = 0u;
@@ -1112,6 +1135,10 @@ void Menu_Select(void)
                 s_ui_page == UI_PAGE_KKF_PID_DAMPED_TWO ||
                 s_ui_page == UI_PAGE_KKF_PID_DAMPED_THREE ||
                 s_ui_page == UI_PAGE_KKF_PID_DAMPED_FOUR);
+    uint8 eight_turn_edit_page =
+        (uint8)(s_ui_page == UI_PAGE_KKF_EIGHT_TURN &&
+                (s_kkf_eight_turn_state == KKF_EIGHT_TURN_EDIT_DEG ||
+                 s_kkf_eight_turn_state == KKF_EIGHT_TURN_EDIT_DPS));
     uint8 kemu1_edit_page =
         (uint8)(s_ui_page == UI_PAGE_KKF_KEMU1_DBG &&
                 (s_kkf_kemu1_state == KKF_KEMU1_EDIT_METERS ||
@@ -1120,6 +1147,11 @@ void Menu_Select(void)
     uint8 k3_long_evt = 0u;
 
     if (pid_edit_page && (s_kkf_pid_state == KKF_PID_STATE_EDIT))
+    {
+        k1_long_evt = Key_ReadLongPress(KEY_ID_1);
+        k3_long_evt = Key_ReadLongPress(KEY_ID_3);
+    }
+    else if (eight_turn_edit_page)
     {
         k1_long_evt = Key_ReadLongPress(KEY_ID_1);
         k3_long_evt = Key_ReadLongPress(KEY_ID_3);
@@ -1151,7 +1183,7 @@ void Menu_Select(void)
             }
             else if (KEY2_PRES == key)
             {
-                // 1:PID_CONFIG 2:START 3:RESET 4:CLEAR 5:MT_ST 6:STATE 7:MODE 8:yaw 9:t_yaw 10:pitch 11:SPD 12:xy 13: (reserved) 14:g_ins_path
+                // 1:PID_CONFIG 2:START 3:RESET 4:CLEAR 5:GPS_SW 6:GPS_DBG 7:STATE 8:MODE 9:yaw 10:t_yaw 11:pitch 12:SPD 13:xy 14:g_ins_path
                 if (s_kkf_main_item == 1u)
                 {
                     s_ui_page = UI_PAGE_KKF_PARAM;
@@ -1182,6 +1214,16 @@ void Menu_Select(void)
                     ips200_clear();
                 }
                 else if (s_kkf_main_item == 5u)
+                {
+                    // GPS 导航开关：ON 时 START 启用 gps_nav；OFF 时 START 不启用
+                    s_kkf_gps_nav_enable = (uint8)(!s_kkf_gps_nav_enable);
+                    if (s_kkf_gps_nav_enable == 0u)
+                    {
+                        gps_nav_stop();
+                    }
+                    ips200_clear();
+                }
+                else if (s_kkf_main_item == 6u)
                 {
                     // 进入 GPS 调试入口（原 MT_ST 插槽）
                     s_ui_page = UI_PAGE_KKF_GPS_DEBUG;
@@ -1456,7 +1498,25 @@ void Menu_Select(void)
             }
             else if (s_kkf_eight_turn_state == KKF_EIGHT_TURN_EDIT_DEG)
             {
-                if (KEY1_PRES == key)
+                if (k1_long_evt && k1_now)
+                {
+                    uint8 i;
+                    for (i = 0u; i < KKF_EIGHT_TURN_LONG_PRESS_EXTRA_STEPS; i++)
+                    {
+                        prog[idx].target_rel_deg -= 1.0f;
+                    }
+                    ips200_clear();
+                }
+                else if (k3_long_evt && k3_now)
+                {
+                    uint8 i;
+                    for (i = 0u; i < KKF_EIGHT_TURN_LONG_PRESS_EXTRA_STEPS; i++)
+                    {
+                        prog[idx].target_rel_deg += 1.0f;
+                    }
+                    ips200_clear();
+                }
+                else if (KEY1_PRES == key)
                 {
                     prog[idx].target_rel_deg -= 1.0f;
                     ips200_clear();
@@ -1475,7 +1535,25 @@ void Menu_Select(void)
             }
             else // KKF_EIGHT_TURN_EDIT_DPS
             {
-                if (KEY1_PRES == key)
+                if (k1_long_evt && k1_now)
+                {
+                    uint8 i;
+                    for (i = 0u; i < KKF_EIGHT_TURN_LONG_PRESS_EXTRA_STEPS; i++)
+                    {
+                        prog[idx].rate_dps -= 1.0f;
+                    }
+                    ips200_clear();
+                }
+                else if (k3_long_evt && k3_now)
+                {
+                    uint8 i;
+                    for (i = 0u; i < KKF_EIGHT_TURN_LONG_PRESS_EXTRA_STEPS; i++)
+                    {
+                        prog[idx].rate_dps += 1.0f;
+                    }
+                    ips200_clear();
+                }
+                else if (KEY1_PRES == key)
                 {
                     prog[idx].rate_dps -= 1.0f;
                     ips200_clear();

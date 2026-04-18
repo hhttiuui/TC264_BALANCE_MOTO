@@ -44,6 +44,11 @@ extern float show_yaw_deg;
 #define TTOP_EIGHT2_DEFAULT_RATE_DPS       (60.0f)
 #endif
 
+// EX2 段表固定起绕基准角（deg）
+#ifndef TTOP_EIGHT2_EX2_BASE0_DEG
+#define TTOP_EIGHT2_EX2_BASE0_DEG          (180.0f)
+#endif
+
 // ============================ 段表（你后续只需要改这里就能调每段） ============================
 // 约定：目标值是“相对 base0 的偏移量”（deg），最终 target_abs = base0 + target_rel。
 // 例如：[0,30,0,-40,0,180,220,180,150,180]
@@ -139,6 +144,16 @@ static inline uint8 ttop_eight2_is_hold_prev_seg(const volatile ttop_eight2_seg_
 	return (seg->target_rel_deg == 0.0f && seg->rate_dps == 0.0f) ? 1u : 0u;
 }
 
+static inline float ttop_eight2_get_base0_by_program(void)
+{
+	if (s_eight2_prog_id == TTOP_EIGHT2_PROG_EX2)
+	{
+		return (float)TTOP_EIGHT2_EX2_BASE0_DEG;
+	}
+
+	return 0.0f;
+}
+
 // 0,0 作为“占位段”时，目标角继承最近一个非占位段的目标角。
 static float ttop_eight2_resolve_target_rel_deg(uint16 seg_idx)
 {
@@ -208,14 +223,16 @@ uint8 ttop_eight2_task_5ms(void)
 	// 	return 0u;
 	// }
 
-	// 首次进入：抓取 base0，并从当前角开始输出，避免突变
+	// 首次进入：按段表选择基准角。
+	// - MAIN/EX1：base0=0
+	// - EX2：base0=180（固定从 180 度开始绕）
 	if (!s_eight2.started)
 	{
 		s_eight2.started = 1u;
 		s_eight2.done = 0u;
 		s_eight2.seg_idx = 0u;
 		s_eight2.inpos_ticks = 0u;
-		s_eight2.base0_yaw_deg = 0.0f;
+		s_eight2.base0_yaw_deg = ttop_eight2_get_base0_by_program();
 		s_eight2.yaw_out_deg = s_eight2.base0_yaw_deg;
 	}
 

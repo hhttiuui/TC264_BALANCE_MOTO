@@ -11,6 +11,7 @@
 #include "gps_display.h"
 #include "gps_key_led.h"
 #include "gps_Azimuth.h"
+#include "ttop_kemu3.h"
 #include <stdio.h>
 
 
@@ -62,9 +63,11 @@ void ttop_funtion_mode_once_apply(void)
 		PID_INIT_BY_MODE(PID_MODE_DAMPED_FOUR);
 		ttop_eight2_init();
 	}
-	else if (funtion_kemu == 7u)// MODE7：
+	else if (funtion_kemu == 7u)// MODE7：kemu3
 	{
-		PID_INIT_BY_MODE(PID_MODE_CASCADE_EX1);
+		ttop_kemu3_init();
+		ttop_speed_change_init(PID_MODE_CASCADE_EX2, PID_MODE_CASCADE_EX1);
+		PID_INIT_BY_MODE(PID_MODE_CASCADE);
 	}
 	else if (funtion_kemu == 8u)// MODE8：
 	{
@@ -84,7 +87,7 @@ void ttop_funtion_mode_once_apply(void)
 		ins_dr_init();// 初始化航迹推算
 		ins_path_follow_init();// 初始化跟踪控制器
 	}
-	else if (funtion_kemu == 11u)// MODE11：预留
+	else if (funtion_kemu == 11u)// MODE11：RC预留
 	{
 		ttop_rc_control_init();
 		ttop_speed_change_init(PID_MODE_CASCADE_EX2, PID_MODE_CASCADE_EX1);
@@ -160,9 +163,10 @@ void ttop_pid_task_5ms(void)
 		if(eight_flag)ttop_eight2_task_5ms();
 		pid_timer_handler_by_mode(PID_MODE_DAMPED_THREE);
 	}
-	else if(funtion_kemu == 7)// MODE7：
+	else if(funtion_kemu == 7)// MODE7：kemu3
 	{
-		pid_timer_handler_by_mode(PID_MODE_CASCADE_EX1);
+		ttop_kemu3_task_5ms();
+		ttop_speed_change_task_5ms();
 	}
 	else if(funtion_kemu == 8)// MODE8：
 	{
@@ -189,7 +193,7 @@ void ttop_pid_task_5ms(void)
 		// PID 链路根据 g_yaw_target_deg 执行转向
 		pid_timer_handler_by_mode(PID_MODE_DAMPED_THREE);
 	}
-	else if(funtion_kemu == 11)// MODE11：预留
+	else if(funtion_kemu == 11)// MODE11：RC预留
 	{
 		ttop_rc_control_task_5ms();
 		ttop_speed_change_task_5ms();
@@ -218,7 +222,11 @@ void ttop_funtion_new(void)
 	if(funtion_kemu == 1){}
 
 	//变速
-	else if(funtion_kemu == 2){}
+	else if(funtion_kemu == 2)
+	{
+		ttop_speed_change_task_5ms();
+
+	}
 	// MODE3：直线速度55
 	else if(funtion_kemu == 3){}
 	// MODE4：直线速度45
@@ -239,8 +247,12 @@ void ttop_funtion_new(void)
 		if(eight_flag)ttop_eight2_task_5ms();
 
 	}
-	// MODE7：
-	else if(funtion_kemu == 7){}
+	// MODE7：kemu3
+	else if(funtion_kemu == 7)
+	{
+		ttop_kemu3_task_5ms();
+		ttop_speed_change_task_5ms();
+	}
 	// MODE8：
 	else if(funtion_kemu == 8){}
 	// MODE9：惯导 - 示教录制
@@ -263,7 +275,7 @@ void ttop_funtion_new(void)
 		ttop_speed_change_task_5ms();
 		
 	}
-	// MODE11：预留
+	// MODE11：RC预留
 	else if(funtion_kemu == 11)
 	{
 		ttop_rc_control_task_5ms();
@@ -336,6 +348,7 @@ void ttop_funtion_init(void)
 
     // 赛事功能：里程到点停机 初始化
     ttop_stop_init();
+	gps_nav_init();
 }
 
 // ============================ GPS 事件实现 ============================
@@ -408,4 +421,9 @@ void ttop_gps_calc_and_show_headings(void)
 
 		cursor_x += (uint16)(item_w + 16);
 	}
+}
+
+void ttop_gps_nav_stop(void)
+{
+	gps_nav_stop();
 }

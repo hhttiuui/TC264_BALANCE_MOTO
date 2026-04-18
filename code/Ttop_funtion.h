@@ -69,6 +69,8 @@ void ttop_gps_display_route(void);
 void ttop_gps_clear_and_show_help(void);
 // KEY4: 璁＄畻骞舵樉绀哄娈佃埅鍚戣
 void ttop_gps_calc_and_show_headings(void);
+// 停止 GPS 导航任务输出（不清空保存点/导航状态）
+void ttop_gps_nav_stop(void);
 
 #ifdef __cplusplus
 }
