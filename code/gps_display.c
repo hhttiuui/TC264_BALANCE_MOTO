@@ -15,6 +15,11 @@
 gps_point_t gps_points[GPS_POINT_MAX_NUM] = {0};
 uint8 gps_draw_point_count = 0;  // 实际用于绘图的有效点位数量
 
+// 实时轨迹点位数组（1s记录一个点）
+gps_point_t gps_realtime_points[GPS_REALTIME_POINT_MAX_NUM] = {0};
+uint8 gps_realtime_point_count = 0;  // 实时轨迹点位数量
+uint8 gps_realtime_recording = 0;    // 实时轨迹记录标志
+
 // 内部变量（缩放/偏移参数）
 static double lon_min = 0, lon_max = 0;  // 经度极值
 static double lat_min = 0, lat_max = 0;  // 纬度极值
@@ -53,37 +58,100 @@ void Buzzer_check(int time2)
 
 }
 
+// 启动实时轨迹记录
+void gps_realtime_start_recording(void)
+{
+    gps_realtime_point_count = 0;
+    gps_realtime_recording = 1;
+}
+
+// 停止实时轨迹记录
+void gps_realtime_stop_recording(void)
+{
+    gps_realtime_recording = 0;
+}
+
+// 添加实时轨迹点（1s调用一次）
+// 循环缓冲区：超过200个点时，删除最早的点，保持最近200个点
+void gps_realtime_add_point(double lon, double lat)
+{
+    if(!gps_realtime_recording) return;
+
+    // 如果已满，将所有点向前移动一位（删除第一个点）
+    if(gps_realtime_point_count >= GPS_REALTIME_POINT_MAX_NUM)
+    {
+        for(uint8 i = 0; i < GPS_REALTIME_POINT_MAX_NUM - 1; i++)
+        {
+            gps_realtime_points[i] = gps_realtime_points[i + 1];
+        }
+        gps_realtime_point_count = GPS_REALTIME_POINT_MAX_NUM - 1;
+    }
+
+    // 在末尾添加新点
+    gps_realtime_points[gps_realtime_point_count].lon = lon;
+    gps_realtime_points[gps_realtime_point_count].lat = lat;
+    gps_realtime_point_count++;
+}
+
 
 void gps_calc_scroll_offset(void)
 {
-    if(gps_draw_point_count == 0) return;
+    uint8 total_count = gps_draw_point_count + gps_realtime_point_count;
+    if(total_count == 0) return;
 
-    double x_meter[GPS_POINT_MAX_NUM] = {0.0};
-    double y_meter[GPS_POINT_MAX_NUM] = {0.0};
-    double ref_lon = gps_points[0].lon;
-    double ref_lat = gps_points[0].lat;
+    double x_meter[GPS_POINT_MAX_NUM + GPS_REALTIME_POINT_MAX_NUM] = {0.0};
+    double y_meter[GPS_POINT_MAX_NUM + GPS_REALTIME_POINT_MAX_NUM] = {0.0};
+
+    // 使用第一个有效点作为参考点
+    double ref_lon = (gps_draw_point_count > 0) ? gps_points[0].lon : gps_realtime_points[0].lon;
+    double ref_lat = (gps_draw_point_count > 0) ? gps_points[0].lat : gps_realtime_points[0].lat;
+
     double meter_per_deg_lon = 111320.0 * cos(ref_lat * DEG_TO_RAD);
     double meter_per_deg_lat = 110540.0;
 
     double x_min = 0.0, x_max = 0.0, y_min = 0.0, y_max = 0.0;
+    uint8 idx = 0;
 
+    // 处理存点轨迹
     for(uint8 i = 0; i < gps_draw_point_count; i++)
     {
-        x_meter[i] = (gps_points[i].lon - ref_lon) * meter_per_deg_lon;
-        y_meter[i] = (gps_points[i].lat - ref_lat) * meter_per_deg_lat;
+        x_meter[idx] = (gps_points[i].lon - ref_lon) * meter_per_deg_lon;
+        y_meter[idx] = (gps_points[i].lat - ref_lat) * meter_per_deg_lat;
 
-        if(0 == i)
+        if(idx == 0)
         {
-            x_min = x_max = x_meter[i];
-            y_min = y_max = y_meter[i];
+            x_min = x_max = x_meter[idx];
+            y_min = y_max = y_meter[idx];
         }
         else
         {
-            if(x_meter[i] < x_min) x_min = x_meter[i];
-            if(x_meter[i] > x_max) x_max = x_meter[i];
-            if(y_meter[i] < y_min) y_min = y_meter[i];
-            if(y_meter[i] > y_max) y_max = y_meter[i];
+            if(x_meter[idx] < x_min) x_min = x_meter[idx];
+            if(x_meter[idx] > x_max) x_max = x_meter[idx];
+            if(y_meter[idx] < y_min) y_min = y_meter[idx];
+            if(y_meter[idx] > y_max) y_max = y_meter[idx];
         }
+        idx++;
+    }
+
+    // 处理实时轨迹
+    for(uint8 i = 0; i < gps_realtime_point_count; i++)
+    {
+        x_meter[idx] = (gps_realtime_points[i].lon - ref_lon) * meter_per_deg_lon;
+        y_meter[idx] = (gps_realtime_points[i].lat - ref_lat) * meter_per_deg_lat;
+
+        if(idx == 0)
+        {
+            x_min = x_max = x_meter[idx];
+            y_min = y_max = y_meter[idx];
+        }
+        else
+        {
+            if(x_meter[idx] < x_min) x_min = x_meter[idx];
+            if(x_meter[idx] > x_max) x_max = x_meter[idx];
+            if(y_meter[idx] < y_min) y_min = y_meter[idx];
+            if(y_meter[idx] > y_max) y_max = y_meter[idx];
+        }
+        idx++;
     }
 
     lon_min = x_min;
@@ -121,12 +189,25 @@ void gps_calc_scroll_offset(void)
     offset_x = (int16)round_to_i32(screen_center_x - center_x_m * scale_ratio);
     offset_y = (int16)round_to_i32(screen_center_y + center_y_m * scale_ratio);
 
+    // 计算存点轨迹的屏幕坐标
+    idx = 0;
     for(uint8 i = 0; i < gps_draw_point_count; i++)
     {
-        int32 sx = round_to_i32(x_meter[i] * scale_ratio + (double)offset_x);
-        int32 sy = round_to_i32((double)offset_y - y_meter[i] * scale_ratio);
+        int32 sx = round_to_i32(x_meter[idx] * scale_ratio + (double)offset_x);
+        int32 sy = round_to_i32((double)offset_y - y_meter[idx] * scale_ratio);
         gps_points[i].screen_x = (uint16)clamp_to_screen_x(sx);
         gps_points[i].screen_y = (uint16)clamp_to_screen_y(sy);
+        idx++;
+    }
+
+    // 计算实时轨迹的屏幕坐标
+    for(uint8 i = 0; i < gps_realtime_point_count; i++)
+    {
+        int32 sx = round_to_i32(x_meter[idx] * scale_ratio + (double)offset_x);
+        int32 sy = round_to_i32((double)offset_y - y_meter[idx] * scale_ratio);
+        gps_realtime_points[i].screen_x = (uint16)clamp_to_screen_x(sx);
+        gps_realtime_points[i].screen_y = (uint16)clamp_to_screen_y(sy);
+        idx++;
     }
 }
 
@@ -165,5 +246,21 @@ void gps_draw_points_lines(uint16 point_color, uint16 line_color, uint8 point_si
                 ips200_draw_point((uint16)sx, (uint16)sy, point_color);
             }
         }
+    }
+}
+
+/**
+ * @brief 绘制实时轨迹线（绿色）
+ */
+void gps_draw_realtime_line(uint16 line_color)
+{
+    if(gps_realtime_point_count < 2) return;
+
+    // 绘制实时轨迹连线（相邻点连接）
+    for(uint8 i = 0; i < gps_realtime_point_count - 1; i++)
+    {
+        ips200_draw_line(gps_realtime_points[i].screen_x, gps_realtime_points[i].screen_y,
+                        gps_realtime_points[i+1].screen_x, gps_realtime_points[i+1].screen_y,
+                        line_color);
     }
 }

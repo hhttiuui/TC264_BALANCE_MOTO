@@ -369,6 +369,15 @@ void ttop_gps_display_route(void)
     load_saved_route_points();
 	gps_calc_scroll_offset();
 	gps_draw_points_lines(RGB565_BLACK, RGB565_BLACK, 3);
+
+	// 如果实时轨迹记录已启动，绘制红色实时轨迹线
+	if(gps_realtime_recording && gps_realtime_point_count > 0)
+	{
+		gps_draw_realtime_line(RGB565_RED);  // 改为红色
+	}
+
+	// 添加延时，防止闪屏（200ms）
+	system_delay_ms(200);
 }
 
 void ttop_gps_clear_and_show_help(void)

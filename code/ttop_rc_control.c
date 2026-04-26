@@ -122,7 +122,7 @@ void ttop_rc_control_init(void)
     s_rc_cfg.speed.in_max = 1400.0f;
     s_rc_cfg.speed.out_min = 0.0f;
     s_rc_cfg.speed.out_center = 0.0f;
-    s_rc_cfg.speed.out_max = 320.0f;
+    s_rc_cfg.speed.out_max = 420.0f;
     s_rc_cfg.speed.sensitivity = 1.0f;
 
     s_rc_speed_target_out = 0.0f;

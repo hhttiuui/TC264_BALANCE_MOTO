@@ -700,7 +700,9 @@ typedef enum
     KKF_PID_FIELD_AHRS_KP = 1u,
     KKF_PID_FIELD_YAW_KP,
     KKF_PID_FIELD_ANGLE_KP,
+    KKF_PID_FIELD_ANGLE_KD,
     KKF_PID_FIELD_RATE_KP,
+    KKF_PID_FIELD_RATE_KD,
     KKF_PID_FIELD_DAMP_K,
     KKF_PID_FIELD_DAMP_MAX,
     KKF_PID_FIELD_MOTOR_TGT,
@@ -736,10 +738,12 @@ static void kkf_pid_draw_for_mode(pid_mode_t mode)
     // 1 ahrs_kp
     // 2 yaw.kp
     // 3 angle.kp
-    // 4 rate.kp（无则 0）
-    // 5 damp_k
-    // 6 damp_max
-    // 7 motor_target_counts_5ms
+    // 4 angle.kd
+    // 5 rate.kp（无则 0）
+    // 6 rate.kd
+    // 7 damp_k
+    // 8 damp_max
+    // 9 motor_target_counts_5ms
     const pid_mode_cfg_t *cfg = &s_pid_mode_cfg[(uint16)mode];
 
     char cursor[3] = ">";
@@ -765,18 +769,24 @@ static void kkf_pid_draw_for_mode(pid_mode_t mode)
 
     ips200_show_string(16, 4 * 15, "ANG_KP :");
     ips200_show_float(16 * 9, 4 * 15, cfg->angle.kp, 5, 2);
+
+    ips200_show_string(16, 5 * 15, "ANG_KD :");
+    ips200_show_float(16 * 9, 5 * 15, cfg->angle.kd, 5, 2);
     
-    ips200_show_string(16, 5 * 15, "RATE_KP:");
-    ips200_show_float(16 * 9, 5 * 15, cfg->rate.kp, 5, 2);
+    ips200_show_string(16, 6 * 15, "RATE_KP:");
+    ips200_show_float(16 * 9, 6 * 15, cfg->rate.kp, 5, 2);
 
-    ips200_show_string(16, 6 * 15, "DAMP_K :");
-    ips200_show_float(16 * 9, 6 * 15, cfg->damp_k, 5, 2);
+    ips200_show_string(16, 7 * 15, "RATE_KD:");
+    ips200_show_float(16 * 9, 7 * 15, cfg->rate.kd, 5, 2);
 
-    ips200_show_string(16, 7 * 15, "DAMP_MX:");
-    ips200_show_float(16 * 9, 7 * 15, cfg->damp_max, 5, 2);
+    ips200_show_string(16, 8 * 15, "DAMP_K :");
+    ips200_show_float(16 * 9, 8 * 15, cfg->damp_k, 5, 2);
 
-    ips200_show_string(16, 8 * 15, "MOT_TGT:");
-    ips200_show_int(16 * 9, 8 * 15, cfg->motor_target_counts_5ms, 6);
+    ips200_show_string(16, 9 * 15, "DAMP_MX:");
+    ips200_show_float(16 * 9, 9 * 15, cfg->damp_max, 5, 2);
+
+    ips200_show_string(16, 10 * 15, "MOT_TGT:");
+    ips200_show_int(16 * 9, 10 * 15, cfg->motor_target_counts_5ms, 6);
 
     // 光标：行号 = 字段序号 + 1（因为从第2行开始显示字段）
     ips200_show_string(0, (uint16)((1u + (uint16)s_kkf_pid_item) * 15u), cursor);
@@ -789,7 +799,7 @@ static void kkf_pid_adjust_value(pid_mode_t mode, kkf_pid_field_t field, int8 di
     // dir: +1 / -1
     pid_mode_cfg_t *cfg = &s_pid_mode_cfg[(uint16)mode];
 
-    // 步进：kp 0.01；damp 0.1；motor 1
+    // 步进：ahrs/yaw/rate kp = 0.01；angle kp = 0.1；angle/rate kd = 0.01；damp/motor 保持原值
     if (field == KKF_PID_FIELD_AHRS_KP)
     {
         cfg->ahrs_kp += (dir > 0) ? 0.01f : -0.01f;
@@ -805,10 +815,20 @@ static void kkf_pid_adjust_value(pid_mode_t mode, kkf_pid_field_t field, int8 di
         cfg->angle.kp += (dir > 0) ? 0.1f : -0.1f;
         if (cfg->angle.kp < 0.0f) cfg->angle.kp = 0.0f;
     }
+    else if (field == KKF_PID_FIELD_ANGLE_KD)
+    {
+        cfg->angle.kd += (dir > 0) ? 0.01f : -0.01f;
+        if (cfg->angle.kd < 0.0f) cfg->angle.kd = 0.0f;
+    }
     else if (field == KKF_PID_FIELD_RATE_KP)
     {
-        cfg->rate.kp += (dir > 0) ? 0.1f : -0.1f;
+        cfg->rate.kp += (dir > 0) ? 0.01f : -0.01f;
         if (cfg->rate.kp < 0.0f) cfg->rate.kp = 0.0f;
+    }
+    else if (field == KKF_PID_FIELD_RATE_KD)
+    {
+        cfg->rate.kd += (dir > 0) ? 0.01f : -0.01f;
+        if (cfg->rate.kd < 0.0f) cfg->rate.kd = 0.0f;
     }
     else if (field == KKF_PID_FIELD_DAMP_K)
     {
