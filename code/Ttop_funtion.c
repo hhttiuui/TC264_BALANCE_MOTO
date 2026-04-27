@@ -71,7 +71,8 @@ void ttop_funtion_mode_once_apply(void)
 	}
 	else if (funtion_kemu == 8u)// MODE8：
 	{
-		PID_INIT_BY_MODE(PID_MODE_CASCADE_EX2);
+		ttop_rc_control_init();
+		ttop_speed_change_init(PID_MODE_CASCADE_EX2, PID_MODE_CASCADE_EX1);
 	}
 	else if (funtion_kemu == 9u)// MODE9：惯导 - 示教录制
 	{
@@ -254,7 +255,12 @@ void ttop_funtion_new(void)
 		ttop_speed_change_task_5ms();
 	}
 	// MODE8：
-	else if(funtion_kemu == 8){}
+	else if(funtion_kemu == 8)
+	{
+		ttop_rc_control_speed_only_task_5ms();
+		ttop_speed_change_task_5ms();
+
+	}
 	// MODE9：惯导 - 示教录制
 	else if(funtion_kemu == 9)
 	{

@@ -35,8 +35,12 @@ typedef struct
 void ttop_rc_control_init(void);
 void ttop_rc_control_set_config(const ttop_rc_control_cfg_t *cfg);
 const ttop_rc_control_cfg_t *ttop_rc_control_get_config(void);
+// 以当前接收的 CH0 原始值重置 yaw 输入中心（用于开车前零点校准）
+void ttop_rc_control_zero_reset_yaw_center_by_ch0(void);
 void ttop_rc_control_emergency_stop_now(void);
 void ttop_rc_control_task_5ms(void);
+// 仅根据 RC 调整速度（不改变 yaw 目标）
+void ttop_rc_control_speed_only_task_5ms(void);
 
 #ifdef __cplusplus
 }

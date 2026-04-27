@@ -167,46 +167,52 @@ void ttop_speed_change_task_5ms(void)
 
 	// 以 EX1/EX2 的速度点作为严格锚点：
 	// speed=v_low 时严格等于 low 的 Kp，speed=v_high 时严格等于 high 的 Kp。
-	// 在 EX1-20 到 EX2+20 内按 1/v^2 比例映射，窗口外不再继续外推。
-	const float v_extrap_low = v_low - 20.0f;
-	const float v_extrap_high = v_high + 20.0f;
+	// angle_kp 在高速侧继续按 1/v^2 映射（不做上限钳制）；
+	// rate_kp 也按 EX1/EX2 两锚点做同类映射，并做上部封顶。
 
 	if (++s_spd.kp_update_div_cnt >= (uint8_t)TTOP_SPEED_CHANGE_UPDATE_DIV)
 	{
 		s_spd.kp_update_div_cnt = 0u;
-		float v_eval = s_spd.speed_abs_filt;
-		if (v_eval < v_extrap_low) v_eval = v_extrap_low;
-		if (v_eval > v_extrap_high) v_eval = v_extrap_high;
+		float inv_low = ttop_inv_sq_local(v_low);
+		float inv_high = ttop_inv_sq_local(v_high);
+		float den = inv_low - inv_high;
 
-		if (v_eval <= v_low)
+		// angle_kp：低速侧保持低速锚点；高速侧继续按 1/v^2 外推。
+		if (s_spd.speed_abs_filt <= v_low)
 		{
-			// 低速侧固定使用低速锚点参数，避免出现“低速却更像高速”的反向效果。
 			s_spd.angle_kp_tgt = cfg_low->angle.kp;
-			s_spd.rate_kp_tgt = cfg_low->rate.kp;
-		}
-		else if (v_eval >= v_high)
-		{
-			// 高速侧固定使用高速锚点参数。
-			s_spd.angle_kp_tgt = cfg_high->angle.kp;
-			s_spd.rate_kp_tgt = cfg_high->rate.kp;
 		}
 		else
 		{
-			float inv_low = ttop_inv_sq_local(v_low);
-			float inv_high = ttop_inv_sq_local(v_high);
-			float inv_eval = ttop_inv_sq_local(v_eval);
-			float den = inv_low - inv_high;
-			float alpha = 0.0f;
+			float inv_eval_angle = ttop_inv_sq_local(s_spd.speed_abs_filt);
+			float alpha_angle = 0.0f;
 
 			if (ttop_absf_local(den) > 1e-12f)
 			{
-				// alpha: v_low -> 0, v_high -> 1
-				alpha = (inv_low - inv_eval) / den;
+				alpha_angle = (inv_low - inv_eval_angle) / den;
 			}
 
-			alpha = ttop_clampf_local(alpha, 0.0f, 1.0f);
-			s_spd.angle_kp_tgt = ttop_lerpf_local(cfg_low->angle.kp, cfg_high->angle.kp, alpha);
-			s_spd.rate_kp_tgt = ttop_lerpf_local(cfg_low->rate.kp, cfg_high->rate.kp, alpha);
+			if (alpha_angle < 0.0f) alpha_angle = 0.0f;
+			s_spd.angle_kp_tgt = ttop_lerpf_local(cfg_low->angle.kp, cfg_high->angle.kp, alpha_angle);
+		}
+
+		// rate_kp：与 angle_kp 一样按 EX1/EX2 两锚点做 1/v^2 映射外推（上不封顶）。
+		if (s_spd.speed_abs_filt <= v_low)
+		{
+			s_spd.rate_kp_tgt = cfg_low->rate.kp;
+		}
+		else
+		{
+			float inv_eval_rate = ttop_inv_sq_local(s_spd.speed_abs_filt);
+			float alpha_rate = 0.0f;
+
+			if (ttop_absf_local(den) > 1e-12f)
+			{
+				alpha_rate = (inv_low - inv_eval_rate) / den;
+			}
+
+			if (alpha_rate < 0.0f) alpha_rate = 0.0f;
+			s_spd.rate_kp_tgt = ttop_lerpf_local(cfg_low->rate.kp, cfg_high->rate.kp, alpha_rate);
 		}
 
 		if (s_spd.angle_kp_tgt < 0.0f) s_spd.angle_kp_tgt = 0.0f;

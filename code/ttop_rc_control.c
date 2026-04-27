@@ -139,6 +139,12 @@ const ttop_rc_control_cfg_t *ttop_rc_control_get_config(void)
     return &s_rc_cfg;
 }
 
+void ttop_rc_control_zero_reset_yaw_center_by_ch0(void)
+{
+    // yaw 控制使用 CH0 输入，因此中心校准读取 CH0。
+    s_rc_cfg.yaw.in_center = (float)uart_receiver.channel[0];
+}
+
 void ttop_rc_control_emergency_stop_now(void)
 {
     int16 ch4 = uart_receiver.channel[3];
@@ -228,6 +234,41 @@ void ttop_rc_control_task_5ms(void)
 
     s_rc_speed_target_out += delta;
     motor_set_target_counts_per_5ms((int16)roundf(s_rc_speed_target_out));
+
+    uart_receiver.finsh_flag = 0u;
+}
+
+void ttop_rc_control_speed_only_task_5ms(void)
+{
+    // 仅做速度控制：保留与 ttop_rc_control_task_5ms 相同的速度映射与斜坡策略。
+    if (uart_receiver.finsh_flag == 0u) return;
+    if (uart_receiver.state == 0u)
+    {
+        uart_receiver.finsh_flag = 0u;
+        return;
+    }
+
+    // CH4 急停态下，持续屏蔽本周期控制输出。
+    if (s_rc_emergency_active)
+    {
+        s_rc_speed_target_out = 0.0f;
+        motor_set_target_counts_per_5ms(0);
+        uart_receiver.finsh_flag = 0u;
+        return;
+    }
+
+    {
+        float speed_target_raw = (float)ttop_rc_map_ch1_to_speed_counts((float)uart_receiver.channel[1]);
+        float delta = speed_target_raw - s_rc_speed_target_out;
+
+        if (delta > TTOP_RC_SPEED_SLEW_COUNTS_PER_5MS)
+            delta = TTOP_RC_SPEED_SLEW_COUNTS_PER_5MS;
+        else if (delta < -TTOP_RC_SPEED_SLEW_COUNTS_PER_5MS)
+            delta = -TTOP_RC_SPEED_SLEW_COUNTS_PER_5MS;
+
+        s_rc_speed_target_out += delta;
+        motor_set_target_counts_per_5ms((int16)roundf(s_rc_speed_target_out));
+    }
 
     uart_receiver.finsh_flag = 0u;
 }

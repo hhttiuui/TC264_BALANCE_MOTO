@@ -921,6 +921,9 @@ static void kkf_ui_prepare_font(void)
 
 void Menu_StartAll(void)
 {
+    // Start 时执行一次遥控零点重置
+    ttop_rc_control_zero_reset_yaw_center_by_ch0();
+
     funtion_ready_flag = 1u;
     ahrs_yaw_zero_request_set();
     ttop_eight2_reset_now();
