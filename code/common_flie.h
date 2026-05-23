@@ -44,6 +44,11 @@ typedef enum
 	PID_MODE_DAMPED_FOUR = 4,
 	PID_MODE_CASCADE_EX1 = 5, // 新增：CASCADE 参数组1（默认复制 PID_MODE_CASCADE）
 	PID_MODE_CASCADE_EX2 = 6, // 新增：CASCADE 参数组2（默认复制 PID_MODE_CASCADE）
+	PID_MODE_CASCADE_EX3 = 7,
+	PID_MODE_CASCADE_EX4 = 8,
+	PID_MODE_CASCADE_EX5 = 9,
+	PID_MODE_CASCADE_EX6 = 10,
+	PID_MODE_CASCADE_EX7 = 11,
 } pid_mode_t;
 
 // ============================================================================
@@ -102,7 +107,7 @@ typedef struct
 
 
 // 配置表条目数（与 pid_mode_t 的最后一个枚举值保持一致）
-#define PID_MODE_CFG_COUNT   (7u)
+#define PID_MODE_CFG_COUNT   (12u)
 
 extern pid_mode_cfg_t s_pid_mode_cfg[PID_MODE_CFG_COUNT];
 

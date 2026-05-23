@@ -12,7 +12,7 @@
 
 // 速度低通滤波系数（0~1，越大越平滑）
 #ifndef TTOP_SPEED_CHANGE_LPF_ALPHA
-#define TTOP_SPEED_CHANGE_LPF_ALPHA     (0.97f)
+#define TTOP_SPEED_CHANGE_LPF_ALPHA     (0.98f)
 #endif
 
 // 动态插值目标更新分频（2 表示每 10ms 更新一次目标）
@@ -60,6 +60,7 @@ typedef struct
 	pid_mode_t mode_low;
 	float speed_abs_filt;
 	float speed_abs_filt_prev;
+	float speed_pred;
 	uint8_t kp_update_div_cnt;
 	float angle_kp_now;
 	float angle_kp_tgt;
@@ -67,7 +68,28 @@ typedef struct
 	float rate_kp_tgt;
 } ttop_speed_change_ctrl_t;
 
-static ttop_speed_change_ctrl_t s_spd = {0u, PID_MODE_CASCADE, PID_MODE_CASCADE_EX2, PID_MODE_CASCADE_EX1, 0.0f, 0.0f, 0u, 0.0f, 0.0f, 0.0f, 0.0f};
+static ttop_speed_change_ctrl_t s_spd = {0u, PID_MODE_CASCADE, PID_MODE_CASCADE_EX2, PID_MODE_CASCADE_EX1, 0.0f, 0.0f, 0.0f, 0u, 0.0f, 0.0f, 0.0f, 0.0f};
+
+// 拟合方式选择（可被菜单修改）：0=1/v^2 映射，1=线性 y=kx+b
+volatile uint8 g_ttop_speed_change_fit_mode = 2u;
+
+// 速度低通滤波系数（0~1，可被菜单修改）
+volatile float g_ttop_speed_change_lpf_alpha = (float)TTOP_SPEED_CHANGE_LPF_ALPHA;
+
+// 速度预测增益（0~2）：speed_pred = speed_filt + gain * dv_filt
+volatile float g_ttop_speed_change_pred_gain = 5.0f;
+
+#define TTOP_SPEED_CHANGE_POINT_COUNT (7u)
+static const pid_mode_t s_spd_point_modes[TTOP_SPEED_CHANGE_POINT_COUNT] =
+{
+	PID_MODE_CASCADE_EX1,
+	PID_MODE_CASCADE_EX2,
+	PID_MODE_CASCADE_EX3,
+	PID_MODE_CASCADE_EX4,
+	PID_MODE_CASCADE_EX5,
+	PID_MODE_CASCADE_EX6,
+	PID_MODE_CASCADE_EX7,
+};
 
 static inline float ttop_absf_local(float x)
 {
@@ -121,11 +143,12 @@ void ttop_speed_change_init(pid_mode_t high_mode, pid_mode_t low_mode)
 	s_spd.inited = 1u;
 	s_spd.mode = PID_MODE_CASCADE;
 
-	// 仅接受 cascade 策略作为高/低速参数来源，非法输入回退到 EX2/EX1。
-	s_spd.mode_high = ttop_mode_is_cascade(high_mode) ? high_mode : PID_MODE_CASCADE_EX2;
+	// 兼容旧接口：高/低速参数仅做默认兜底，分段线性拟合使用 EX1..EX7 表。
+	s_spd.mode_high = ttop_mode_is_cascade(high_mode) ? high_mode : PID_MODE_CASCADE_EX7;
 	s_spd.mode_low = ttop_mode_is_cascade(low_mode) ? low_mode : PID_MODE_CASCADE_EX1;
 	s_spd.speed_abs_filt = 0.0f;
 	s_spd.speed_abs_filt_prev = 0.0f;
+	s_spd.speed_pred = 0.0f;
 	s_spd.kp_update_div_cnt = 0u;
 
 	const pid_mode_cfg_t *cfg_low = ttop_cfg_by_mode(s_spd.mode_low);
@@ -142,13 +165,19 @@ void ttop_speed_change_task_5ms(void)
 {
 	if (!s_spd.inited)
 	{
-		ttop_speed_change_init(PID_MODE_CASCADE_EX2, PID_MODE_CASCADE_EX1);
+		ttop_speed_change_init(PID_MODE_CASCADE_EX7, PID_MODE_CASCADE_EX1);
 	}
 
 	// 使用编码器 5ms 增量的绝对值作为速度量。
 	const float speed_abs_raw = ttop_absf_local((float)encoder_get_demo5_delta_5ms());
-	s_spd.speed_abs_filt = (float)TTOP_SPEED_CHANGE_LPF_ALPHA * s_spd.speed_abs_filt +
-						  (1.0f - (float)TTOP_SPEED_CHANGE_LPF_ALPHA) * speed_abs_raw;
+	s_spd.speed_abs_filt = g_ttop_speed_change_lpf_alpha * s_spd.speed_abs_filt +
+					  (1.0f - g_ttop_speed_change_lpf_alpha) * speed_abs_raw;
+
+	// 速度预测：用滤波速度的差分作为“加速度”代理
+	float dv_now = s_spd.speed_abs_filt - s_spd.speed_abs_filt_prev;
+	float dv_pred = ttop_clampf_local(dv_now, -(float)TTOP_SPEED_CHANGE_STEP_DV_MAX, (float)TTOP_SPEED_CHANGE_STEP_DV_MAX);
+	s_spd.speed_pred = s_spd.speed_abs_filt + g_ttop_speed_change_pred_gain * dv_pred;
+	if (s_spd.speed_pred < 0.0f) s_spd.speed_pred = 0.0f;
 
 	const pid_mode_cfg_t *cfg_low = ttop_cfg_by_mode(s_spd.mode_low);
 	const pid_mode_cfg_t *cfg_high = ttop_cfg_by_mode(s_spd.mode_high);
@@ -161,9 +190,14 @@ void ttop_speed_change_task_5ms(void)
 		v_high = 200.0f;
 	}
 
+	float angle_slope_abs = 0.0f;
+	float rate_slope_abs = 0.0f;
 	const float dv_anchor = (v_high > v_low + 1e-6f) ? (v_high - v_low) : 1.0f;
-	const float angle_slope_abs = ttop_absf_local(cfg_high->angle.kp - cfg_low->angle.kp) / dv_anchor;
-	const float rate_slope_abs = ttop_absf_local(cfg_high->rate.kp - cfg_low->rate.kp) / dv_anchor;
+	if (dv_anchor > 1e-6f)
+	{
+		angle_slope_abs = ttop_absf_local(cfg_high->angle.kp - cfg_low->angle.kp) / dv_anchor;
+		rate_slope_abs = ttop_absf_local(cfg_high->rate.kp - cfg_low->rate.kp) / dv_anchor;
+	}
 
 	// 以 EX1/EX2 的速度点作为严格锚点：
 	// speed=v_low 时严格等于 low 的 Kp，speed=v_high 时严格等于 high 的 Kp。
@@ -177,42 +211,151 @@ void ttop_speed_change_task_5ms(void)
 		float inv_high = ttop_inv_sq_local(v_high);
 		float den = inv_low - inv_high;
 
-		// angle_kp：低速侧保持低速锚点；高速侧继续按 1/v^2 外推。
-		if (s_spd.speed_abs_filt <= v_low)
+		if (g_ttop_speed_change_fit_mode == 0u)
 		{
-			s_spd.angle_kp_tgt = cfg_low->angle.kp;
+			// angle_kp：低速侧保持低速锚点；高速侧继续按 1/v^2 外推。
+			if (s_spd.speed_pred <= v_low)
+			{
+				s_spd.angle_kp_tgt = cfg_low->angle.kp;
+			}
+			else
+			{
+				float inv_eval_angle = ttop_inv_sq_local(s_spd.speed_pred);
+				float alpha_angle = 0.0f;
+
+				if (ttop_absf_local(den) > 1e-12f)
+				{
+					alpha_angle = (inv_low - inv_eval_angle) / den;
+				}
+
+				if (alpha_angle < 0.0f) alpha_angle = 0.0f;
+				s_spd.angle_kp_tgt = ttop_lerpf_local(cfg_low->angle.kp, cfg_high->angle.kp, alpha_angle);
+			}
+
+			// rate_kp：与 angle_kp 一样按 EX1/EX2 两锚点做 1/v^2 映射外推（上不封顶）。
+			if (s_spd.speed_pred <= v_low)
+			{
+				s_spd.rate_kp_tgt = cfg_low->rate.kp;
+			}
+			else
+			{
+				float inv_eval_rate = ttop_inv_sq_local(s_spd.speed_pred);
+				float alpha_rate = 0.0f;
+
+				if (ttop_absf_local(den) > 1e-12f)
+				{
+					alpha_rate = (inv_low - inv_eval_rate) / den;
+				}
+
+				if (alpha_rate < 0.0f) alpha_rate = 0.0f;
+				s_spd.rate_kp_tgt = ttop_lerpf_local(cfg_low->rate.kp, cfg_high->rate.kp, alpha_rate);
+			}
+		}
+		else if (g_ttop_speed_change_fit_mode == 1u)
+		{
+			float angle_k = 0.0f;
+			float angle_b = cfg_low->angle.kp;
+			float rate_k = 0.0f;
+			float rate_b = cfg_low->rate.kp;
+
+			if (dv_anchor > 1e-6f)
+			{
+				angle_k = (cfg_high->angle.kp - cfg_low->angle.kp) / dv_anchor;
+				angle_b = cfg_low->angle.kp - angle_k * v_low;
+				rate_k = (cfg_high->rate.kp - cfg_low->rate.kp) / dv_anchor;
+				rate_b = cfg_low->rate.kp - rate_k * v_low;
+			}
+
+			if (s_spd.speed_pred <= v_low)
+			{
+				s_spd.angle_kp_tgt = cfg_low->angle.kp;
+				s_spd.rate_kp_tgt = cfg_low->rate.kp;
+			}
+			else
+			{
+				s_spd.angle_kp_tgt = angle_k * s_spd.speed_pred + angle_b;
+				s_spd.rate_kp_tgt = rate_k * s_spd.speed_pred + rate_b;
+			}
 		}
 		else
 		{
-			float inv_eval_angle = ttop_inv_sq_local(s_spd.speed_abs_filt);
-			float alpha_angle = 0.0f;
+			float speeds[TTOP_SPEED_CHANGE_POINT_COUNT];
+			const pid_mode_cfg_t *cfgs[TTOP_SPEED_CHANGE_POINT_COUNT];
+			uint8_t count = 0u;
 
-			if (ttop_absf_local(den) > 1e-12f)
+			for (uint8_t i = 0u; i < (uint8_t)TTOP_SPEED_CHANGE_POINT_COUNT; i++)
 			{
-				alpha_angle = (inv_low - inv_eval_angle) / den;
+				const pid_mode_cfg_t *cfg = ttop_cfg_by_mode(s_spd_point_modes[i]);
+				if (!ttop_mode_is_cascade(s_spd_point_modes[i]))
+				{
+					continue;
+				}
+				speeds[count] = (float)cfg->motor_target_counts_5ms;
+				cfgs[count] = cfg;
+				count++;
 			}
 
-			if (alpha_angle < 0.0f) alpha_angle = 0.0f;
-			s_spd.angle_kp_tgt = ttop_lerpf_local(cfg_low->angle.kp, cfg_high->angle.kp, alpha_angle);
-		}
-
-		// rate_kp：与 angle_kp 一样按 EX1/EX2 两锚点做 1/v^2 映射外推（上不封顶）。
-		if (s_spd.speed_abs_filt <= v_low)
-		{
-			s_spd.rate_kp_tgt = cfg_low->rate.kp;
-		}
-		else
-		{
-			float inv_eval_rate = ttop_inv_sq_local(s_spd.speed_abs_filt);
-			float alpha_rate = 0.0f;
-
-			if (ttop_absf_local(den) > 1e-12f)
+			if (count < 2u)
 			{
-				alpha_rate = (inv_low - inv_eval_rate) / den;
+				s_spd.angle_kp_tgt = cfg_low->angle.kp;
+				s_spd.rate_kp_tgt = cfg_low->rate.kp;
 			}
+			else
+			{
+				for (uint8_t i = 0u; i + 1u < count; i++)
+				{
+					for (uint8_t j = 0u; j + 1u < count - i; j++)
+					{
+						if (speeds[j] > speeds[j + 1u])
+						{
+							float vs = speeds[j];
+							const pid_mode_cfg_t *cs = cfgs[j];
+							speeds[j] = speeds[j + 1u];
+							cfgs[j] = cfgs[j + 1u];
+							speeds[j + 1u] = vs;
+							cfgs[j + 1u] = cs;
+						}
+					}
+				}
 
-			if (alpha_rate < 0.0f) alpha_rate = 0.0f;
-			s_spd.rate_kp_tgt = ttop_lerpf_local(cfg_low->rate.kp, cfg_high->rate.kp, alpha_rate);
+				float v = s_spd.speed_pred;
+				uint8_t seg = 0u;
+				if (v <= speeds[0])
+				{
+					seg = 0u;
+					v = speeds[0];
+				}
+				else if (v >= speeds[count - 1u])
+				{
+					seg = (uint8_t)(count - 2u);
+					v = speeds[count - 1u];
+				}
+				else
+				{
+					for (uint8_t i = 0u; i + 1u < count; i++)
+					{
+						if (v <= speeds[i + 1u])
+						{
+							seg = i;
+							break;
+						}
+					}
+				}
+
+				float v0 = speeds[seg];
+				float v1 = speeds[seg + 1u];
+				float dv = v1 - v0;
+				float t = (dv > 1e-6f) ? ((v - v0) / dv) : 0.0f;
+
+				s_spd.angle_kp_tgt = ttop_lerpf_local(cfgs[seg]->angle.kp, cfgs[seg + 1u]->angle.kp, t);
+				s_spd.rate_kp_tgt = ttop_lerpf_local(cfgs[seg]->rate.kp, cfgs[seg + 1u]->rate.kp, t);
+
+				if (dv > 1e-6f)
+				{
+					angle_slope_abs = ttop_absf_local(cfgs[seg + 1u]->angle.kp - cfgs[seg]->angle.kp) / dv;
+					rate_slope_abs = ttop_absf_local(cfgs[seg + 1u]->rate.kp - cfgs[seg]->rate.kp) / dv;
+				}
+			}
 		}
 
 		if (s_spd.angle_kp_tgt < 0.0f) s_spd.angle_kp_tgt = 0.0f;
@@ -246,6 +389,9 @@ pid_mode_t ttop_speed_change_get_mode(void){return s_spd.mode;}
 
 //返回当前滤波后的速度绝对值（用于调试显示）
 float ttop_speed_change_get_speed_abs_filt(void){return s_spd.speed_abs_filt;}
+
+//返回当前预测速度（用于调试显示）
+float ttop_speed_change_get_speed_pred(void){return s_spd.speed_pred;}
 
 //返回当前动态插值后的 angle_kp（用于调试显示）
 float ttop_speed_change_get_angle_kp(void){return s_spd.angle_kp_now;}

@@ -49,11 +49,17 @@ typedef enum
     UI_PAGE_KKF_DYN_PID = 19,        // 界面1_1_11：动态 PID 参数显示
     UI_PAGE_KKF_KEY_DBG = 20,        // 界面1_1_12：按键状态调试（KEY1/2/3）
     UI_PAGE_KKF_KEMU1_DBG = 21,      // 界面1_1_13：kemu1 段表调试
+    UI_PAGE_KKF_SPCH_DBG = 27,       // 界面1_1_14：速度变化调试
 
     // 界面1_1_4 ~ 1_1_8：PID 参数（直接操作 s_pid_mode_cfg）
     UI_PAGE_KKF_PID_CASCADE = 5,
     UI_PAGE_KKF_PID_CASCADE2 = 11,
     UI_PAGE_KKF_PID_CASCADE3 = 12,
+    UI_PAGE_KKF_PID_CASCADE4 = 22,
+    UI_PAGE_KKF_PID_CASCADE5 = 23,
+    UI_PAGE_KKF_PID_CASCADE6 = 24,
+    UI_PAGE_KKF_PID_CASCADE7 = 25,
+    UI_PAGE_KKF_PID_CASCADE8 = 26,
     UI_PAGE_KKF_PID_ANGLE = 6,
     UI_PAGE_KKF_PID_DAMPED_TWO = 7,
     UI_PAGE_KKF_PID_DAMPED_THREE = 8,
@@ -69,6 +75,7 @@ static volatile uint8 s_kkf_param_item = 1u;
 static volatile uint8 s_kkf_mode_item = 1u;
 static volatile uint8 s_kkf_eight_turn_item = 1u;
 static volatile uint8 s_kkf_pid_item = 1u;
+static volatile uint8 s_kkf_spch_item = 1u;
 
 // GPS 调试子菜单当前选项（1..4），用于 kkf_gps_debug_draw / Menu_Select
 static volatile uint8 s_kkf_gps_item = 1u;
@@ -77,7 +84,7 @@ static volatile uint8 s_kkf_gps_item = 1u;
 
 // PID 选择：当前选中的 PID 模式（用于 PID_CHANGE 进入编辑）
 static volatile pid_mode_t s_kkf_pid_mode_id = PID_MODE_CASCADE;
-static volatile uint8 s_kkf_pid_mode_item = 1u; // 1..7
+static volatile uint8 s_kkf_pid_mode_item = 1u; // 1..12
 
 // 航点查看页：当前页（从 0 开始）
 static volatile uint16 s_kkf_ins_path_page = 0u;
@@ -118,6 +125,11 @@ static const char *kkf_pid_mode_str(pid_mode_t mode)
         case PID_MODE_CASCADE: return "CASCADE";
         case PID_MODE_CASCADE_EX1: return "CASCADE2";
         case PID_MODE_CASCADE_EX2: return "CASCADE3";
+        case PID_MODE_CASCADE_EX3: return "CASCADE4";
+        case PID_MODE_CASCADE_EX4: return "CASCADE5";
+        case PID_MODE_CASCADE_EX5: return "CASCADE6";
+        case PID_MODE_CASCADE_EX6: return "CASCADE7";
+        case PID_MODE_CASCADE_EX7: return "CASCADE8";
         case PID_MODE_ANGLE: return "ANGLE";
         case PID_MODE_DAMPED_TWO: return "DAMPED2";
         case PID_MODE_DAMPED_THREE: return "DAMPED3";
@@ -133,10 +145,15 @@ static uint8 kkf_pid_mode_to_item(pid_mode_t mode)
         case PID_MODE_CASCADE: return 1u;
         case PID_MODE_CASCADE_EX1: return 2u;
         case PID_MODE_CASCADE_EX2: return 3u;
-        case PID_MODE_ANGLE: return 4u;
-        case PID_MODE_DAMPED_TWO: return 5u;
-        case PID_MODE_DAMPED_THREE: return 6u;
-        case PID_MODE_DAMPED_FOUR: return 7u;
+        case PID_MODE_CASCADE_EX3: return 4u;
+        case PID_MODE_CASCADE_EX4: return 5u;
+        case PID_MODE_CASCADE_EX5: return 6u;
+        case PID_MODE_CASCADE_EX6: return 7u;
+        case PID_MODE_CASCADE_EX7: return 8u;
+        case PID_MODE_ANGLE: return 9u;
+        case PID_MODE_DAMPED_TWO: return 10u;
+        case PID_MODE_DAMPED_THREE: return 11u;
+        case PID_MODE_DAMPED_FOUR: return 12u;
         default: return 1u;
     }
 }
@@ -147,10 +164,15 @@ static pid_mode_t kkf_item_to_pid_mode(uint8 item)
     {
         case 2u: return PID_MODE_CASCADE_EX1;
         case 3u: return PID_MODE_CASCADE_EX2;
-        case 4u: return PID_MODE_ANGLE;
-        case 5u: return PID_MODE_DAMPED_TWO;
-        case 6u: return PID_MODE_DAMPED_THREE;
-        case 7u: return PID_MODE_DAMPED_FOUR;
+        case 4u: return PID_MODE_CASCADE_EX3;
+        case 5u: return PID_MODE_CASCADE_EX4;
+        case 6u: return PID_MODE_CASCADE_EX5;
+        case 7u: return PID_MODE_CASCADE_EX6;
+        case 8u: return PID_MODE_CASCADE_EX7;
+        case 9u: return PID_MODE_ANGLE;
+        case 10u: return PID_MODE_DAMPED_TWO;
+        case 11u: return PID_MODE_DAMPED_THREE;
+        case 12u: return PID_MODE_DAMPED_FOUR;
         case 1u:
         default: return PID_MODE_CASCADE;
     }
@@ -163,6 +185,11 @@ static ui_page_t kkf_pid_mode_to_page(pid_mode_t mode)
         case PID_MODE_CASCADE: return UI_PAGE_KKF_PID_CASCADE;
         case PID_MODE_CASCADE_EX1: return UI_PAGE_KKF_PID_CASCADE2;
         case PID_MODE_CASCADE_EX2: return UI_PAGE_KKF_PID_CASCADE3;
+        case PID_MODE_CASCADE_EX3: return UI_PAGE_KKF_PID_CASCADE4;
+        case PID_MODE_CASCADE_EX4: return UI_PAGE_KKF_PID_CASCADE5;
+        case PID_MODE_CASCADE_EX5: return UI_PAGE_KKF_PID_CASCADE6;
+        case PID_MODE_CASCADE_EX6: return UI_PAGE_KKF_PID_CASCADE7;
+        case PID_MODE_CASCADE_EX7: return UI_PAGE_KKF_PID_CASCADE8;
         case PID_MODE_ANGLE: return UI_PAGE_KKF_PID_ANGLE;
         case PID_MODE_DAMPED_TWO: return UI_PAGE_KKF_PID_DAMPED_TWO;
         case PID_MODE_DAMPED_THREE: return UI_PAGE_KKF_PID_DAMPED_THREE;
@@ -189,6 +216,21 @@ typedef enum
 
 static volatile kkf_kemu1_state_t s_kkf_kemu1_state = KKF_KEMU1_SEL;
 static volatile uint8 s_kkf_kemu1_item = 0u; // 0=counts_per_meter, 1..5=seg0..4
+
+typedef enum
+{
+    KKF_SPCH_FIELD_FIT_MODE = 1u,
+    KKF_SPCH_FIELD_LPF_ALPHA,
+    KKF_SPCH_FIELD_COUNT = KKF_SPCH_FIELD_LPF_ALPHA,
+} kkf_spch_field_t;
+
+typedef enum
+{
+    KKF_SPCH_STATE_SEL = 0u,
+    KKF_SPCH_STATE_EDIT = 1u,
+} kkf_spch_state_t;
+
+static volatile kkf_spch_state_t s_kkf_spch_state = KKF_SPCH_STATE_SEL;
 
 // 模式：1~12（与顶层 funtion_kemu 对齐）
 static volatile uint8 s_kkf_mode = 1u;
@@ -372,6 +414,7 @@ static void kkf_param_draw(void)
     //   CON_DBG（遥控器通道调试）
     //   DYN_PID（动态速度/插值 Kp）
     //   KEY_DBG（按键状态）
+    //   SPCH_DBG（速度变化调试）
     //   KEMU1_DBG（kemu1 段表）
     ips200_show_string(0, 0 * 15, "KOU_KOU_FLY_CAR");
     ips200_show_string(16, 1 * 15, "MODE SEL:");
@@ -385,7 +428,8 @@ static void kkf_param_draw(void)
     ips200_show_string(16, 6 * 15, "CON_DBG");
     ips200_show_string(16, 7 * 15, "DYN_PID");
     ips200_show_string(16, 8 * 15, "KEY_DBG");
-    ips200_show_string(16, 9 * 15, "KEMU1_DBG");
+    ips200_show_string(16, 9 * 15, "SPCH_DBG");
+    ips200_show_string(16, 10 * 15, "KEMU1_DBG");
 
     ips200_show_string(0, s_kkf_param_item * 15, "> ");
 
@@ -400,11 +444,33 @@ static void kkf_dyn_pid_draw(void)
     ips200_show_string(16, 3 * 15, "SPD_F:");
     ips200_show_float(16 * 7, 3 * 15, ttop_speed_change_get_speed_abs_filt(), 8, 2);
 
-    ips200_show_string(16, 5 * 15, "ANG_KP:");
-    ips200_show_float(16 * 7, 5 * 15, ttop_speed_change_get_angle_kp(), 8, 3);
+    ips200_show_string(16, 4 * 15, "SPD_P:");
+    ips200_show_float(16 * 7, 4 * 15, ttop_speed_change_get_speed_pred(), 8, 2);
 
-    ips200_show_string(16, 7 * 15, "RATE_KP:");
-    ips200_show_float(16 * 7, 7 * 15, ttop_speed_change_get_rate_kp(), 8, 3);
+    ips200_show_string(16, 6 * 15, "ANG_KP:");
+    ips200_show_float(16 * 7, 6 * 15, ttop_speed_change_get_angle_kp(), 8, 3);
+
+    ips200_show_string(16, 8 * 15, "RATE_KP:");
+    ips200_show_float(16 * 7, 8 * 15, ttop_speed_change_get_rate_kp(), 8, 3);
+
+    kkf_draw_signature_bottom();
+}
+
+static void kkf_spch_dbg_draw(void)
+{
+    char cursor[3] = ">";
+    if (s_kkf_spch_state == KKF_SPCH_STATE_EDIT) cursor[0] = '-';
+
+    ips200_show_string(0, 0 * 15, "KOU_KOU_FLY_CAR");
+    ips200_show_string(16, 1 * 15, "SPCH_DBG");
+
+    ips200_show_string(16, 3 * 15, "FIT_MODE:");
+    ips200_show_int(16 * 8, 3 * 15, (int32)g_ttop_speed_change_fit_mode, 2);
+
+    ips200_show_string(16, 4 * 15, "LPF_ALPHA:");
+    ips200_show_float(16 * 8, 4 * 15, g_ttop_speed_change_lpf_alpha, 4, 2);
+
+    ips200_show_string(0, (uint16)((2u + (uint16)s_kkf_spch_item) * 15u), cursor);
 
     kkf_draw_signature_bottom();
 }
@@ -563,10 +629,15 @@ static void kkf_pid_mode_select_draw(void)
     ips200_show_string(16, 2 * 15, "CASCADE");
     ips200_show_string(16, 3 * 15, "CASCADE2");
     ips200_show_string(16, 4 * 15, "CASCADE3");
-    ips200_show_string(16, 5 * 15, "ANGLE");
-    ips200_show_string(16, 6 * 15, "DAMPED2");
-    ips200_show_string(16, 7 * 15, "DAMPED3");
-    ips200_show_string(16, 8 * 15, "DAMPED4");
+    ips200_show_string(16, 5 * 15, "CASCADE4");
+    ips200_show_string(16, 6 * 15, "CASCADE5");
+    ips200_show_string(16, 7 * 15, "CASCADE6");
+    ips200_show_string(16, 8 * 15, "CASCADE7");
+    ips200_show_string(16, 9 * 15, "CASCADE8");
+    ips200_show_string(16, 10 * 15, "ANGLE");
+    ips200_show_string(16, 11 * 15, "DAMPED2");
+    ips200_show_string(16, 12 * 15, "DAMPED3");
+    ips200_show_string(16, 13 * 15, "DAMPED4");
 
     // 光标：从第 2 行开始
     ips200_show_string(0, (uint16)((1u + (uint16)s_kkf_pid_mode_item) * 15u), "> ");
@@ -724,6 +795,11 @@ static inline pid_mode_t kkf_page_to_pid_mode(ui_page_t page)
         case UI_PAGE_KKF_PID_CASCADE: return PID_MODE_CASCADE;
         case UI_PAGE_KKF_PID_CASCADE2: return PID_MODE_CASCADE_EX1;
         case UI_PAGE_KKF_PID_CASCADE3: return PID_MODE_CASCADE_EX2;
+        case UI_PAGE_KKF_PID_CASCADE4: return PID_MODE_CASCADE_EX3;
+        case UI_PAGE_KKF_PID_CASCADE5: return PID_MODE_CASCADE_EX4;
+        case UI_PAGE_KKF_PID_CASCADE6: return PID_MODE_CASCADE_EX5;
+        case UI_PAGE_KKF_PID_CASCADE7: return PID_MODE_CASCADE_EX6;
+        case UI_PAGE_KKF_PID_CASCADE8: return PID_MODE_CASCADE_EX7;
         case UI_PAGE_KKF_PID_ANGLE: return PID_MODE_ANGLE;
         case UI_PAGE_KKF_PID_DAMPED_TWO: return PID_MODE_DAMPED_TWO;
         case UI_PAGE_KKF_PID_DAMPED_THREE: return PID_MODE_DAMPED_THREE;
@@ -755,6 +831,11 @@ static void kkf_pid_draw_for_mode(pid_mode_t mode)
     if (mode == PID_MODE_CASCADE) ips200_show_string(16, 1 * 15, "PID_CASCADE");
     else if (mode == PID_MODE_CASCADE_EX1) ips200_show_string(16, 1 * 15, "PID_CASCADE2");
     else if (mode == PID_MODE_CASCADE_EX2) ips200_show_string(16, 1 * 15, "PID_CASCADE3");
+    else if (mode == PID_MODE_CASCADE_EX3) ips200_show_string(16, 1 * 15, "PID_CASCADE4");
+    else if (mode == PID_MODE_CASCADE_EX4) ips200_show_string(16, 1 * 15, "PID_CASCADE5");
+    else if (mode == PID_MODE_CASCADE_EX5) ips200_show_string(16, 1 * 15, "PID_CASCADE6");
+    else if (mode == PID_MODE_CASCADE_EX6) ips200_show_string(16, 1 * 15, "PID_CASCADE7");
+    else if (mode == PID_MODE_CASCADE_EX7) ips200_show_string(16, 1 * 15, "PID_CASCADE8");
     else if (mode == PID_MODE_ANGLE) ips200_show_string(16, 1 * 15, "PID_ANGLE");
     else if (mode == PID_MODE_DAMPED_TWO) ips200_show_string(16, 1 * 15, "PID_DAMPED2");
     else if (mode == PID_MODE_DAMPED_THREE) ips200_show_string(16, 1 * 15, "PID_DAMPED3");
@@ -994,6 +1075,10 @@ void User_Interface(void)//UI显示
         {
             kkf_dyn_pid_draw();
         }
+        else if (s_ui_page == UI_PAGE_KKF_SPCH_DBG)
+        {
+            kkf_spch_dbg_draw();
+        }
         else if (s_ui_page == UI_PAGE_KKF_KEY_DBG)
         {
             kkf_key_dbg_draw();
@@ -1020,12 +1105,17 @@ void User_Interface(void)//UI显示
             kkf_ins_path_draw();
         }
         else if (s_ui_page == UI_PAGE_KKF_PID_CASCADE ||
-                 s_ui_page == UI_PAGE_KKF_PID_CASCADE2 ||
-                 s_ui_page == UI_PAGE_KKF_PID_CASCADE3 ||
-                 s_ui_page == UI_PAGE_KKF_PID_ANGLE ||
-                 s_ui_page == UI_PAGE_KKF_PID_DAMPED_TWO ||
-                 s_ui_page == UI_PAGE_KKF_PID_DAMPED_THREE ||
-                 s_ui_page == UI_PAGE_KKF_PID_DAMPED_FOUR)
+             s_ui_page == UI_PAGE_KKF_PID_CASCADE2 ||
+             s_ui_page == UI_PAGE_KKF_PID_CASCADE3 ||
+             s_ui_page == UI_PAGE_KKF_PID_CASCADE4 ||
+             s_ui_page == UI_PAGE_KKF_PID_CASCADE5 ||
+             s_ui_page == UI_PAGE_KKF_PID_CASCADE6 ||
+             s_ui_page == UI_PAGE_KKF_PID_CASCADE7 ||
+             s_ui_page == UI_PAGE_KKF_PID_CASCADE8 ||
+             s_ui_page == UI_PAGE_KKF_PID_ANGLE ||
+             s_ui_page == UI_PAGE_KKF_PID_DAMPED_TWO ||
+             s_ui_page == UI_PAGE_KKF_PID_DAMPED_THREE ||
+             s_ui_page == UI_PAGE_KKF_PID_DAMPED_FOUR)
         {
             kkf_pid_draw_for_mode(kkf_page_to_pid_mode(s_ui_page));
         }
@@ -1154,6 +1244,11 @@ void Menu_Select(void)
         (uint8)(s_ui_page == UI_PAGE_KKF_PID_CASCADE ||
                 s_ui_page == UI_PAGE_KKF_PID_CASCADE2 ||
                 s_ui_page == UI_PAGE_KKF_PID_CASCADE3 ||
+                s_ui_page == UI_PAGE_KKF_PID_CASCADE4 ||
+                s_ui_page == UI_PAGE_KKF_PID_CASCADE5 ||
+                s_ui_page == UI_PAGE_KKF_PID_CASCADE6 ||
+                s_ui_page == UI_PAGE_KKF_PID_CASCADE7 ||
+                s_ui_page == UI_PAGE_KKF_PID_CASCADE8 ||
                 s_ui_page == UI_PAGE_KKF_PID_ANGLE ||
                 s_ui_page == UI_PAGE_KKF_PID_DAMPED_TWO ||
                 s_ui_page == UI_PAGE_KKF_PID_DAMPED_THREE ||
@@ -1392,16 +1487,16 @@ void Menu_Select(void)
         }
         else if (s_ui_page == UI_PAGE_KKF_PARAM)
         {
-            // 1:MODE_SEL 2:EIGHT_TURN 3:E8_PROG 4:PID_CHANGE 5:PID_MODE 6:CON_DBG 7:DYN_PID 8:KEY_DBG 9:KEMU1_DBG
+            // 1:MODE_SEL 2:EIGHT_TURN 3:E8_PROG 4:PID_CHANGE 5:PID_MODE 6:CON_DBG 7:DYN_PID 8:KEY_DBG 9:SPCH_DBG 10:KEMU1_DBG
             if (KEY3_PRES == key)
             {
                 if (s_kkf_param_item > 1u) s_kkf_param_item--;
-                else s_kkf_param_item = 9u;
+                else s_kkf_param_item = 10u;
                 ips200_clear();
             }
             else if (KEY1_PRES == key)
             {
-                if (s_kkf_param_item < 9u) s_kkf_param_item++;
+                if (s_kkf_param_item < 10u) s_kkf_param_item++;
                 else s_kkf_param_item = 1u;
                 ips200_clear();
             }
@@ -1459,6 +1554,13 @@ void Menu_Select(void)
                     ips200_clear();
                 }
                 else if (s_kkf_param_item == 9u)
+                {
+                    s_ui_page = UI_PAGE_KKF_SPCH_DBG;
+                    s_kkf_spch_item = 1u;
+                    s_kkf_spch_state = KKF_SPCH_STATE_SEL;
+                    ips200_clear();
+                }
+                else if (s_kkf_param_item == 10u)
                 {
                     s_ui_page = UI_PAGE_KKF_KEMU1_DBG;
                     s_kkf_kemu1_item = 0u;
@@ -1638,12 +1740,12 @@ void Menu_Select(void)
             else if (KEY3_PRES == key)
             {
                 if (s_kkf_pid_mode_item > 1u) s_kkf_pid_mode_item--;
-                else s_kkf_pid_mode_item = 7u;
+                else s_kkf_pid_mode_item = 12u;
                 ips200_clear();
             }
             else if (KEY1_PRES == key)
             {
-                if (s_kkf_pid_mode_item < 7u) s_kkf_pid_mode_item++;
+                if (s_kkf_pid_mode_item < 12u) s_kkf_pid_mode_item++;
                 else s_kkf_pid_mode_item = 1u;
                 ips200_clear();
             }
@@ -1670,6 +1772,70 @@ void Menu_Select(void)
             {
                 s_ui_page = UI_PAGE_KKF_PARAM;
                 ips200_clear();
+            }
+        }
+        else if (s_ui_page == UI_PAGE_KKF_SPCH_DBG)
+        {
+            // 速度变化调试页：KEY4 返回参数页
+            if (KEY4_PRES == key)
+            {
+                s_ui_page = UI_PAGE_KKF_PARAM;
+                s_kkf_spch_state = KKF_SPCH_STATE_SEL;
+                ips200_clear();
+            }
+            else if (s_kkf_spch_state == KKF_SPCH_STATE_SEL)
+            {
+                if (KEY3_PRES == key)
+                {
+                    if (s_kkf_spch_item > 1u) s_kkf_spch_item--;
+                    else s_kkf_spch_item = (uint8)KKF_SPCH_FIELD_COUNT;
+                    ips200_clear();
+                }
+                else if (KEY1_PRES == key)
+                {
+                    if (s_kkf_spch_item < (uint8)KKF_SPCH_FIELD_COUNT) s_kkf_spch_item++;
+                    else s_kkf_spch_item = 1u;
+                    ips200_clear();
+                }
+                else if (KEY2_PRES == key)
+                {
+                    s_kkf_spch_state = KKF_SPCH_STATE_EDIT;
+                    ips200_clear();
+                }
+            }
+            else
+            {
+                if (KEY1_PRES == key)
+                {
+                    if (s_kkf_spch_item == KKF_SPCH_FIELD_FIT_MODE)
+                    {
+                        if (g_ttop_speed_change_fit_mode > 0u) g_ttop_speed_change_fit_mode--;
+                    }
+                    else
+                    {
+                        g_ttop_speed_change_lpf_alpha -= 0.01f;
+                        if (g_ttop_speed_change_lpf_alpha < 0.0f) g_ttop_speed_change_lpf_alpha = 0.0f;
+                    }
+                    ips200_clear();
+                }
+                else if (KEY3_PRES == key)
+                {
+                    if (s_kkf_spch_item == KKF_SPCH_FIELD_FIT_MODE)
+                    {
+                        if (g_ttop_speed_change_fit_mode < 2u) g_ttop_speed_change_fit_mode++;
+                    }
+                    else
+                    {
+                        g_ttop_speed_change_lpf_alpha += 0.01f;
+                        if (g_ttop_speed_change_lpf_alpha > 1.0f) g_ttop_speed_change_lpf_alpha = 1.0f;
+                    }
+                    ips200_clear();
+                }
+                else if (KEY2_PRES == key)
+                {
+                    s_kkf_spch_state = KKF_SPCH_STATE_SEL;
+                    ips200_clear();
+                }
             }
         }
         else if (s_ui_page == UI_PAGE_KKF_KEY_DBG)
@@ -1873,13 +2039,18 @@ void Menu_Select(void)
             }
         }
 
-    else if (s_ui_page == UI_PAGE_KKF_PID_CASCADE ||
+        else if (s_ui_page == UI_PAGE_KKF_PID_CASCADE ||
          s_ui_page == UI_PAGE_KKF_PID_CASCADE2 ||
          s_ui_page == UI_PAGE_KKF_PID_CASCADE3 ||
-                 s_ui_page == UI_PAGE_KKF_PID_ANGLE ||
-                 s_ui_page == UI_PAGE_KKF_PID_DAMPED_TWO ||
-                 s_ui_page == UI_PAGE_KKF_PID_DAMPED_THREE ||
-                 s_ui_page == UI_PAGE_KKF_PID_DAMPED_FOUR)
+         s_ui_page == UI_PAGE_KKF_PID_CASCADE4 ||
+         s_ui_page == UI_PAGE_KKF_PID_CASCADE5 ||
+         s_ui_page == UI_PAGE_KKF_PID_CASCADE6 ||
+         s_ui_page == UI_PAGE_KKF_PID_CASCADE7 ||
+         s_ui_page == UI_PAGE_KKF_PID_CASCADE8 ||
+             s_ui_page == UI_PAGE_KKF_PID_ANGLE ||
+             s_ui_page == UI_PAGE_KKF_PID_DAMPED_TWO ||
+             s_ui_page == UI_PAGE_KKF_PID_DAMPED_THREE ||
+             s_ui_page == UI_PAGE_KKF_PID_DAMPED_FOUR)
         {
             // PID 参数编辑页：
             // - 选择态('>')：KEY1/KEY3 移动字段；KEY2 进入编辑态('-')

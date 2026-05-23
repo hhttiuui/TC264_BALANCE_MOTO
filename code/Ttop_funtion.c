@@ -60,7 +60,7 @@ void ttop_funtion_mode_once_apply(void)
 	else if (funtion_kemu == 6u)// MODE6：8字
 	{
 		ttop_eight2_select_program(TTOP_EIGHT2_PROG_MAIN);
-		PID_INIT_BY_MODE(PID_MODE_DAMPED_FOUR);
+		PID_INIT_BY_MODE(PID_MODE_DAMPED_THREE);
 		ttop_eight2_init();
 	}
 	else if (funtion_kemu == 7u)// MODE7：kemu3

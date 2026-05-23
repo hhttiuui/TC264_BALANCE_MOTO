@@ -36,6 +36,7 @@ int core0_main(void)
         Menu_Select();
         User_Interface();
         gnss_data_parse();
+        //ips200_show_string(0, 0 * 15, "KOU_KOU_FLY_CAR");
         //led_bzw_show_task_20ms_auto();// LED 鐘舵€佹樉绀� + 鏇存柊鏍囧織浣�
 
         

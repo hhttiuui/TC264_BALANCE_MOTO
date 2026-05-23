@@ -24,6 +24,11 @@ volatile uint8 pid_flag = 0;
 #define PID_MR_ANGLE_DT_S   (0.004f)   // 角度环：4ms
 #define PID_MR_YAW_DT_S     (0.008f)   // yaw 外环：8ms
 
+// 多速率调度：yaw 环开关（1=启用，0=关闭）
+#ifndef PID_MR_ENABLE_YAW
+#define PID_MR_ENABLE_YAW   (1u)
+#endif
+
 // IMU/AHRS 调用周期（秒）：当前用2ms触发 
 #ifndef IMU_TASK_DT_S
 #define IMU_TASK_DT_S   (0.002f)
@@ -88,6 +93,11 @@ static volatile float g_pitch_rate_dps_f_cache = 0.0f;
 // 舵机最终输出死区（单位：与 out 相同，用于抑制舵机零点附近抖动建议0-10）
 #ifndef SERVO_OUT_DEADZONE
 #define SERVO_OUT_DEADZONE   (2.0f)
+#endif
+
+// yaw 门控：当 |pitch| 超过该值时关闭 yaw 环（deg）
+#ifndef YAW_GATE_ABS_PITCH_MAX_DEG
+#define YAW_GATE_ABS_PITCH_MAX_DEG   (30.0f)
 #endif
 
 // 死区函数（带重映射）：|x|<=dz 输出0；超过死区后减去dz，避免跨越边界跳变。
@@ -371,6 +381,91 @@ pid_mode_cfg_t s_pid_mode_cfg[PID_MODE_CFG_COUNT] =
 		.motor_target_counts_5ms = 200,
 	},
 
+	// PID_MODE_CASCADE_EX3（默认复制 PID_MODE_CASCADE）
+	{
+		.strategy = PID_STRAT_CASCADE,
+		.ahrs_kp = 4.5f,
+		.ahrs_ki = 0.0f,
+		.yaw_gate_off_abs_pitch_deg = 6.0f,
+		.yaw_gate_on_abs_pitch_deg = 4.0f,
+		.yaw = { .kp = 0.7f, .ki = 0.0f, .kd = 0.0012f, .out_min = -20.0f, .out_max = 20.0f, .i_min = -10.0f, .i_max = 10.0f },
+		.angle = { .kp = 18.0f, .ki = 0.0f, .kd = 0.0008f, .out_min = -700.0f, .out_max = 700.0f, .i_min = -150.0f, .i_max = 150.0f },
+		.rate = { .kp = 1.8f, .ki = 0.0f, .kd = 0.0035f, .out_min = -600.0f, .out_max = 600.0f, .i_min = -100.0f, .i_max = 100.0f },
+		.damp_k = 0.0f,
+		.damp_max = 0.0f,
+		.imu_filter_alpha = 0.92f,
+		.servo_init_out = 0.0f,
+		.motor_target_counts_5ms = 200,
+	},
+
+	// PID_MODE_CASCADE_EX4（默认复制 PID_MODE_CASCADE）
+	{
+		.strategy = PID_STRAT_CASCADE,
+		.ahrs_kp = 4.5f,
+		.ahrs_ki = 0.0f,
+		.yaw_gate_off_abs_pitch_deg = 6.0f,
+		.yaw_gate_on_abs_pitch_deg = 4.0f,
+		.yaw = { .kp = 0.7f, .ki = 0.0f, .kd = 0.0012f, .out_min = -20.0f, .out_max = 20.0f, .i_min = -10.0f, .i_max = 10.0f },
+		.angle = { .kp = 18.0f, .ki = 0.0f, .kd = 0.0008f, .out_min = -700.0f, .out_max = 700.0f, .i_min = -150.0f, .i_max = 150.0f },
+		.rate = { .kp = 1.8f, .ki = 0.0f, .kd = 0.0035f, .out_min = -600.0f, .out_max = 600.0f, .i_min = -100.0f, .i_max = 100.0f },
+		.damp_k = 0.0f,
+		.damp_max = 0.0f,
+		.imu_filter_alpha = 0.92f,
+		.servo_init_out = 0.0f,
+		.motor_target_counts_5ms = 200,
+	},
+
+	// PID_MODE_CASCADE_EX5（默认复制 PID_MODE_CASCADE）
+	{
+		.strategy = PID_STRAT_CASCADE,
+		.ahrs_kp = 4.5f,
+		.ahrs_ki = 0.0f,
+		.yaw_gate_off_abs_pitch_deg = 6.0f,
+		.yaw_gate_on_abs_pitch_deg = 4.0f,
+		.yaw = { .kp = 0.7f, .ki = 0.0f, .kd = 0.0012f, .out_min = -20.0f, .out_max = 20.0f, .i_min = -10.0f, .i_max = 10.0f },
+		.angle = { .kp = 18.0f, .ki = 0.0f, .kd = 0.0008f, .out_min = -700.0f, .out_max = 700.0f, .i_min = -150.0f, .i_max = 150.0f },
+		.rate = { .kp = 1.8f, .ki = 0.0f, .kd = 0.0035f, .out_min = -600.0f, .out_max = 600.0f, .i_min = -100.0f, .i_max = 100.0f },
+		.damp_k = 0.0f,
+		.damp_max = 0.0f,
+		.imu_filter_alpha = 0.92f,
+		.servo_init_out = 0.0f,
+		.motor_target_counts_5ms = 200,
+	},
+
+	// PID_MODE_CASCADE_EX6（默认复制 PID_MODE_CASCADE）
+	{
+		.strategy = PID_STRAT_CASCADE,
+		.ahrs_kp = 4.5f,
+		.ahrs_ki = 0.0f,
+		.yaw_gate_off_abs_pitch_deg = 6.0f,
+		.yaw_gate_on_abs_pitch_deg = 4.0f,
+		.yaw = { .kp = 0.7f, .ki = 0.0f, .kd = 0.0012f, .out_min = -20.0f, .out_max = 20.0f, .i_min = -10.0f, .i_max = 10.0f },
+		.angle = { .kp = 18.0f, .ki = 0.0f, .kd = 0.0008f, .out_min = -700.0f, .out_max = 700.0f, .i_min = -150.0f, .i_max = 150.0f },
+		.rate = { .kp = 1.8f, .ki = 0.0f, .kd = 0.0035f, .out_min = -600.0f, .out_max = 600.0f, .i_min = -100.0f, .i_max = 100.0f },
+		.damp_k = 0.0f,
+		.damp_max = 0.0f,
+		.imu_filter_alpha = 0.92f,
+		.servo_init_out = 0.0f,
+		.motor_target_counts_5ms = 200,
+	},
+
+	// PID_MODE_CASCADE_EX7（默认复制 PID_MODE_CASCADE）
+	{
+		.strategy = PID_STRAT_CASCADE,
+		.ahrs_kp = 4.5f,
+		.ahrs_ki = 0.0f,
+		.yaw_gate_off_abs_pitch_deg = 6.0f,
+		.yaw_gate_on_abs_pitch_deg = 4.0f,
+		.yaw = { .kp = 0.7f, .ki = 0.0f, .kd = 0.0012f, .out_min = -20.0f, .out_max = 20.0f, .i_min = -10.0f, .i_max = 10.0f },
+		.angle = { .kp = 18.0f, .ki = 0.0f, .kd = 0.0008f, .out_min = -700.0f, .out_max = 700.0f, .i_min = -150.0f, .i_max = 150.0f },
+		.rate = { .kp = 1.8f, .ki = 0.0f, .kd = 0.0035f, .out_min = -600.0f, .out_max = 600.0f, .i_min = -100.0f, .i_max = 100.0f },
+		.damp_k = 0.0f,
+		.damp_max = 0.0f,
+		.imu_filter_alpha = 0.92f,
+		.servo_init_out = 0.0f,
+		.motor_target_counts_5ms = 200,
+	},
+
 };
 
 static inline const pid_mode_cfg_t *pid_mode_cfg_get(pid_mode_t mode)
@@ -623,10 +718,18 @@ void pid_timer_handler_multirate_2ms(void)
 	if ((s_sched_cnt & 0x01u) == 0u) run_angle = 1u;
 	if ((s_sched_cnt & 0x03u) == 0u) run_yaw = 1u;
 
-	if (run_yaw)
+	if (fabsf(pitch_deg) <= (float)YAW_GATE_ABS_PITCH_MAX_DEG)
 	{
-		s_yaw_target_hold = pid_compute_yaw_target_with_gate_dt(cfg, pitch_deg, yaw_rel_deg, PID_MR_YAW_DT_S);
+		if (run_yaw)
+		{
+			s_yaw_target_hold = pid_compute_yaw_target_with_gate_dt(cfg, pitch_deg, yaw_rel_deg, PID_MR_YAW_DT_S);
+		}
 	}
+	else
+	{
+		s_yaw_target_hold = 0.0f;
+	}
+
 	g_yaw_pid_out_deg = s_yaw_target_hold;
 	pid_target = s_yaw_target_hold;
 

@@ -30,8 +30,18 @@ pid_mode_t ttop_speed_change_get_mode(void);
 
 // 查询动态插值链路实时量（用于菜单调试显示）
 float ttop_speed_change_get_speed_abs_filt(void);
+float ttop_speed_change_get_speed_pred(void);
 float ttop_speed_change_get_angle_kp(void);
 float ttop_speed_change_get_rate_kp(void);
+
+// 拟合方式选择（可被菜单修改）：0=1/v^2 映射，1=线性 y=kx+b
+extern volatile uint8 g_ttop_speed_change_fit_mode;
+
+// 速度低通滤波系数（0~1，可被菜单修改）
+extern volatile float g_ttop_speed_change_lpf_alpha;
+
+// 速度预测增益（0~2）：speed_pred = speed_filt + gain * dv_filt
+extern volatile float g_ttop_speed_change_pred_gain;
 
 
 
