@@ -43,6 +43,18 @@ static double s_last_heading_lon = 0.0;
 static double s_last_heading_lat = 0.0;
 static uint8_t s_last_heading_pos_valid = 0u;
 
+/* ==================== 跳点过滤状态 ==================== */
+static double  s_filt_lon = 0.0;
+static double  s_filt_lat = 0.0;
+static uint8_t s_filt_valid = 0u;
+
+/* ==================== 校准阶段状态 ==================== */
+/* 上电后 START，前 GPS_NAV_CALIB_TICKS 个 100ms（=5s）为校准阶段：
+ * 直接把 heading_0_deg = 0（即把 IMU 上电前方作为 GPS 零点参考），
+ * 校准结束后再进入正常导航。                                         */
+static uint8_t s_calib_remain = 0u;  /* 剩余校准 tick 数，0 表示校准完成 */
+static uint8_t s_calib_just_done = 0u; /* Bug#3修复：校准结束后第一次进导航的标志 */
+
 /* ================================================================
  *  wrap_180 —— 角度归一化到 [-180, +180)
  * ================================================================ */
@@ -136,6 +148,34 @@ static uint8_t gps_pos_valid(double lon, double lat)
     {
         return 0u;
     }
+    return 1u;
+}
+
+/* ================================================================
+ *  GPS 跳点过滤：检测并抑制异常跳变
+ *  返回 1=正常点（已更新），0=跳点（已用上次有效值替代）
+ * ================================================================ */
+static uint8_t gps_filter_outlier(double *lon, double *lat)
+{
+    if (!s_filt_valid)
+    {
+        s_filt_lon = *lon;
+        s_filt_lat = *lat;
+        s_filt_valid = 1u;
+        return 1u;
+    }
+
+    float jump = gps_distance_m(s_filt_lon, s_filt_lat, *lon, *lat);
+    if (jump > (float)GPS_NAV_OUTLIER_MAX_JUMP_M)
+    {
+        /* 跳点：用上次有效坐标替代 */
+        *lon = s_filt_lon;
+        *lat = s_filt_lat;
+        return 0u;
+    }
+
+    s_filt_lon = *lon;
+    s_filt_lat = *lat;
     return 1u;
 }
 
@@ -233,10 +273,15 @@ void gps_nav_init(void)
     s_nav.gps_heading_valid = 0u;
 
     s_nav_started = 0u;
+    s_calib_remain = 0u;
     s_last_heading_lon = 0.0;
     s_last_heading_lat = 0.0;
     s_last_heading_pos_valid = 0u;
     s_yaw_cmd_smooth_deg = show_yaw_deg;
+
+    s_filt_lon = 0.0;
+    s_filt_lat = 0.0;
+    s_filt_valid = 0u;
 }
 
 void gps_nav_start(void)
@@ -250,19 +295,34 @@ void gps_nav_start(void)
     s_nav.drift_correction_deg = 0.0f;
     s_nav.target_point_idx = 0u;
     s_nav.nav_done = 0u;
-    s_nav.heading_0_valid = 0u;
+    s_nav.heading_0_valid = 0u;  /* 清零，让校准阶段的GPS运动来确定 */
     s_nav.gps_heading_valid = 0u;
 
     s_last_heading_lon = 0.0;
     s_last_heading_lat = 0.0;
     s_last_heading_pos_valid = 0u;
     s_yaw_cmd_smooth_deg = show_yaw_deg;
+    s_calib_just_done = 0u;  /* Bug#3修复：重置标志，保证重新start时slew限幅器在校准结束后正确初始化 */
+
+    s_filt_lon = 0.0;
+    s_filt_lat = 0.0;
+    s_filt_valid = 0u;
+
+    /* 校准阶段：走直线，GPS根据运动方向自动确定 heading_0。
+     * 保持 g_yaw_target_deg = 0，PID 维持直线，GPS 采集运动航向写入 heading_0。
+     * 采集到有效位移（heading_0_valid=1）后立刻退出校准阶段；
+     * 最多等待 GPS_NAV_CALIB_TICKS × 100ms（默认10秒）超时兜底。  */
+    g_yaw_target_deg = 0.0f;
+    s_calib_remain = (uint8_t)GPS_NAV_CALIB_TICKS;
+
     s_nav_started = 1u;
 }
 
 void gps_nav_stop(void)
 {
     s_nav_started = 0u;
+    s_calib_remain = 0u;
+    s_filt_valid = 0u;
 }
 
 /* ================================================================
@@ -300,6 +360,56 @@ uint8_t gps_nav_task_100ms(void)
 
     if (!s_nav_started) return 0u;
 
+    /* GPS 跳点过滤：异常跳变时用上次有效坐标替代 */
+    if (gps_pos_valid(cur_lon, cur_lat))
+    {
+        gps_filter_outlier(&cur_lon, &cur_lat);
+    }
+
+    /* ================================================================
+     *  校准阶段（最长10秒）：
+     *  小车走直线（g_yaw_target_deg=0，PID维持直线），
+     *  GPS 根据运动方向自动确定 heading_0（由 drift_correct 内部写入）。
+     *  一旦 heading_0_valid 被置1（采到有效位移）立刻退出校准，
+     *  不再等满剩余 tick；超时后才做兜底 heading_0 = 0。
+     * ================================================================ */
+    if (s_calib_remain > 0u)
+    {
+        gps_nav_drift_correct_100ms(cur_lon, cur_lat);
+        if (s_nav.heading_0_valid)
+        {
+            /* 已采到有效运动航向，立刻结束校准阶段 */
+            s_calib_remain = 0u;
+        }
+        else
+        {
+            s_calib_remain--;
+        }
+        return 0u;
+    }
+
+    /* 校准结束：若超时后 GPS 运动量仍不足（未确定 heading_0），兜底锁定为 0
+     * （即假设上电前方 = GPS正北，仅作保险；实际场景应保证校准期内有足够位移） */
+    if (!s_nav.heading_0_valid)
+    {
+        gps_nav_lock_heading_0(0.0f);
+    }
+
+    /* Bug #3 修复：校准刚结束时同步 slew limiter 的初始值到当前 show_yaw_deg，
+     * 防止校准期间 yaw 漂移导致导航切入时 slew_limit 开始缓慢追赶旧值，
+     * 外观上表现为"一开始就在缓慢转弯"。
+     * 用静态标志保证只在校准结束后第一次导航时执行一次。*/
+    {
+        /* Bug#3修复：校准结束后第一次进入导航时，将slew限幅器同步到当前yaw，
+         * 防止校准期间yaw漂移导致切入导航时缓慢追赶旧值（外观上表现为"一开始缓慢转弯"）。
+         * s_calib_just_done 在 gps_nav_start() 中重置，支持多次start重新初始化。 */
+        if (!s_calib_just_done)
+        {
+            s_yaw_cmd_smooth_deg = show_yaw_deg;
+            s_calib_just_done = 1u;
+        }
+    }
+
     gps_nav_drift_correct_100ms(cur_lon, cur_lat);
 
     if (s_nav.nav_done) return 1u;
@@ -313,16 +423,33 @@ uint8_t gps_nav_task_100ms(void)
     }
 
     idx = s_nav.target_point_idx;
-    dist = gps_distance_m(cur_lon, cur_lat, gps_save_points[idx].lon, gps_save_points[idx].lat);
-    if (dist < (float)GPS_NAV_ARRIVE_RADIUS_M)
+
+    /* ----------------------------------------------------------------
+     *  Bug #1 修复：跳过已非常近（出发点）的点
+     *
+     *  背景：存点时通常第一个点就是出发位置，导航启动时车就在该点附近，
+     *  距离 < GPS_NAV_ARRIVE_RADIUS_M，会立即跳到下一个点（转弯目标），
+     *  造成"一开始就转弯"的假象。
+     *
+     *  修复逻辑：在正常到达判定之前，先检查目标点是否就在当前位置附近，
+     *  如果是（即出发点），直接跳过，追下一个点。
+     *  循环处理，直到找到一个距离足够远的目标点。
+     * ---------------------------------------------------------------- */
+    while (idx < gps_saved_point_count)
     {
+        dist = gps_distance_m(cur_lon, cur_lat, gps_save_points[idx].lon, gps_save_points[idx].lat);
+        if (dist >= (float)GPS_NAV_ARRIVE_RADIUS_M)
+        {
+            break;  /* 找到了足够远的目标点，退出循环 */
+        }
+        /* 当前目标点太近（可能是出发点或已到达点），跳过 */
         s_nav.target_point_idx++;
-        if (s_nav.target_point_idx >= gps_saved_point_count)
+        idx = s_nav.target_point_idx;
+        if (idx >= gps_saved_point_count)
         {
             s_nav.nav_done = 1u;
             return 1u;
         }
-        idx = s_nav.target_point_idx;
     }
 
     gps_target = calc_gps_bearing(cur_lon, cur_lat, gps_save_points[idx].lon, gps_save_points[idx].lat);
@@ -356,4 +483,14 @@ const gps_nav_status_t* gps_nav_status_get(void)
 uint8_t gps_nav_is_done(void)
 {
     return s_nav.nav_done;
+}
+
+uint8_t gps_nav_calib_done(void)
+{
+    return (s_calib_remain == 0u) ? 1u : 0u;
+}
+
+uint8_t gps_nav_calib_remain(void)
+{
+    return s_calib_remain;
 }

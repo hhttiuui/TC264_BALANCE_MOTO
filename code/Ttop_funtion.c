@@ -277,7 +277,7 @@ void ttop_funtion_new(void)
 		// 跟踪任务：更新航迹推算 + Pure Pursuit 计算目标航向 → 自动写 g_yaw_target_deg
 		if(eight_count++>300)eight_flag = 1; 
 		if(eight_flag)ins_path_follow_task_5ms();
-		ttop_rc_control_task_5ms();
+		ttop_rc_control_speed_only_task_5ms();
 		ttop_speed_change_task_5ms();
 		
 	}

@@ -36,6 +36,7 @@
 #include "isr_config.h"
 #include "isr.h"
 #include "gps_nav.h"
+#include "gps_storage.h"
 
 extern int count_pid;
 extern volatile uint8 pid_flag;
@@ -83,6 +84,7 @@ IFX_INTERRUPT(cc60_pit_ch1_isr, 0, CCU6_0_CH1_ISR_PRIORITY)
 uint16 enable_count = 0 , period_count = 0;
 uint8_t enable_flag = 0;
 static uint8_t s_gps_nav_div20 = 0u;
+static uint16 s_gps_storage_div100 = 0u;
 
 uint16 period_2ms_count = 0,period_5ms_count = 0,period_10ms_count = 0;
 
@@ -123,6 +125,12 @@ IFX_INTERRUPT(cc61_pit_ch0_isr, 0, CCU6_1_CH0_ISR_PRIORITY)
         {
             s_gps_nav_div20 = 0u;
             gps_nav_task_100ms();
+        }
+        
+        if(++s_gps_storage_div100 >= 100u)
+        {
+            s_gps_storage_div100 = 0u;
+            gps_storage_task_100ms();
         }
 
     }

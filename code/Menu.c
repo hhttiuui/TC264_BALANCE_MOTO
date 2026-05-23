@@ -25,6 +25,8 @@
 #include "ins_path_follow.h"
 #include "gps_display.h"
 #include "gps_nav.h"
+#include "gps_nav_circle.h"
+#include "gps_storage.h"
 
 // =========================
 // 菜单：扣扣飞车
@@ -50,6 +52,8 @@ typedef enum
     UI_PAGE_KKF_KEY_DBG = 20,        // 界面1_1_12：按键状态调试（KEY1/2/3）
     UI_PAGE_KKF_KEMU1_DBG = 21,      // 界面1_1_13：kemu1 段表调试
     UI_PAGE_KKF_SPCH_DBG = 27,       // 界面1_1_14：速度变化调试
+    UI_PAGE_KKF_GPS_CIRCLE = 28,     // 界面：单点绕圈 GPS 调试
+    UI_PAGE_KKF_GPS_STORAGE = 29,    // 界面：GPS 实时存点轨迹显示
 
     // 界面1_1_4 ~ 1_1_8：PID 参数（直接操作 s_pid_mode_cfg）
     UI_PAGE_KKF_PID_CASCADE = 5,
@@ -77,8 +81,10 @@ static volatile uint8 s_kkf_eight_turn_item = 1u;
 static volatile uint8 s_kkf_pid_item = 1u;
 static volatile uint8 s_kkf_spch_item = 1u;
 
-// GPS 调试子菜单当前选项（1..4），用于 kkf_gps_debug_draw / Menu_Select
+// GPS 调试子菜单当前选项（1..5），用于 kkf_gps_debug_draw / Menu_Select
 static volatile uint8 s_kkf_gps_item = 1u;
+// GPS 圆绕调试页选项（1..5）
+static volatile uint8 s_kkf_gps_circle_item = 1u;
 
 // 菜单中用于选择 motor_request_start 的临时状态（已移除）
 
@@ -327,6 +333,9 @@ static void kkf_main_draw(void)
 
     ips200_show_string(16, 14 * 15, "g_ins_path");
 
+    ips200_show_string(16, 15 * 15, "GPSStorage:");
+    ips200_show_string(16 * 12, 15 * 15, gps_storage_is_recording() ? "on" : "off");
+
     ips200_show_string(0, s_kkf_main_item * 15, "> ");
 
     kkf_draw_signature_bottom();
@@ -444,14 +453,11 @@ static void kkf_dyn_pid_draw(void)
     ips200_show_string(16, 3 * 15, "SPD_F:");
     ips200_show_float(16 * 7, 3 * 15, ttop_speed_change_get_speed_abs_filt(), 8, 2);
 
-    ips200_show_string(16, 4 * 15, "SPD_P:");
-    ips200_show_float(16 * 7, 4 * 15, ttop_speed_change_get_speed_pred(), 8, 2);
+    ips200_show_string(16, 5 * 15, "ANG_KP:");
+    ips200_show_float(16 * 7, 5 * 15, ttop_speed_change_get_angle_kp(), 8, 3);
 
-    ips200_show_string(16, 6 * 15, "ANG_KP:");
-    ips200_show_float(16 * 7, 6 * 15, ttop_speed_change_get_angle_kp(), 8, 3);
-
-    ips200_show_string(16, 8 * 15, "RATE_KP:");
-    ips200_show_float(16 * 7, 8 * 15, ttop_speed_change_get_rate_kp(), 8, 3);
+    ips200_show_string(16, 7 * 15, "RATE_KP:");
+    ips200_show_float(16 * 7, 7 * 15, ttop_speed_change_get_rate_kp(), 8, 3);
 
     kkf_draw_signature_bottom();
 }
@@ -718,7 +724,7 @@ static void kkf_eight2_prog_select_draw(void)
     kkf_draw_signature_bottom();
 }
 
-// GPS 调试空菜单（4 项，占位）
+// GPS 调试空菜单（5 项）
 static void kkf_gps_debug_draw(void)
 {
     ips200_show_string(0, 0 * 15, "KOU_KOU_FLY_CAR");
@@ -726,10 +732,47 @@ static void kkf_gps_debug_draw(void)
     ips200_show_string(16, 1 * 15, "SAVE_PT");
     ips200_show_string(16, 2 * 15, "SHOW_ROUTE");
     ips200_show_string(16, 3 * 15, "SHOW_HEADS");
-    ips200_show_string(16, 4 * 15, "CLEAR");
+    ips200_show_string(16, 4 * 15, "CIRCLE");
+    ips200_show_string(16, 5 * 15, "CLEAR");
 
-    // 光标：从第1行开始显示（顶标题占第0行）
     ips200_show_string(0, (uint16)((uint16)s_kkf_gps_item * 15u), "> ");
+
+    kkf_draw_signature_bottom();
+}
+
+// GPS 单点绕圈调试页
+static void kkf_gps_circle_draw(void)
+{
+    const gps_nav_circle_status_t* st = gps_nav_circle_get_status();
+
+    ips200_show_string(0, 0 * 15, "GPS_CIRCLE");
+
+    ips200_show_string(16, 1 * 15, "SAVE_CENTER");
+    ips200_show_string(16, 2 * 15, "START");
+    ips200_show_string(16, 3 * 15, "STOP");
+    if (st->direction == 1)
+        ips200_show_string(16, 4 * 15, "DIR: CW ");
+    else
+        ips200_show_string(16, 4 * 15, "DIR: CCW");
+    ips200_show_string(16, 5 * 15, "BACK");
+
+    ips200_show_string(0, (uint16)((uint16)s_kkf_gps_circle_item * 15u), "> ");
+
+    ips200_show_string(0, 7 * 15, "CEN:");
+    ips200_show_uint(40, 7 * 15, st->center_valid, 1);
+    ips200_show_string(56, 7 * 15, "RUN:");
+    ips200_show_uint(96, 7 * 15, st->started, 1);
+    ips200_show_string(112, 7 * 15, "CAL:");
+    ips200_show_uint(152, 7 * 15, st->calib_done, 1);
+
+    ips200_show_string(0, 8 * 15, "DST:");
+    ips200_show_float(40, 8 * 15, st->dist_to_center_m, 5, 2);
+
+    ips200_show_string(0, 9 * 15, "TAN:");
+    ips200_show_float(40, 9 * 15, st->tangent_heading_deg, 5, 1);
+
+    ips200_show_string(0, 10 * 15, "IMU:");
+    ips200_show_float(40, 10 * 15, st->imu_target_deg, 5, 1);
 
     kkf_draw_signature_bottom();
 }
@@ -1100,9 +1143,17 @@ void User_Interface(void)//UI显示
             // 专门界面：计算并显示多段航向角
             ttop_gps_calc_and_show_headings();
         }
+        else if (s_ui_page == UI_PAGE_KKF_GPS_CIRCLE)
+        {
+            kkf_gps_circle_draw();
+        }
         else if (s_ui_page == UI_PAGE_KKF_INS_PATH_VIEW)
         {
             kkf_ins_path_draw();
+        }
+        else if (s_ui_page == UI_PAGE_KKF_GPS_STORAGE)
+        {
+            gps_storage_draw();
         }
         else if (s_ui_page == UI_PAGE_KKF_PID_CASCADE ||
              s_ui_page == UI_PAGE_KKF_PID_CASCADE2 ||
@@ -1290,12 +1341,12 @@ void Menu_Select(void)
             if (KEY3_PRES == key)
             {
                 if (s_kkf_main_item > 1u) s_kkf_main_item--;
-                else s_kkf_main_item = 14u;
+                else s_kkf_main_item = 15u;
                 ips200_clear();
             }
             else if (KEY1_PRES == key)
             {
-                if (s_kkf_main_item < 14u) s_kkf_main_item++;
+                if (s_kkf_main_item < 15u) s_kkf_main_item++;
                 else s_kkf_main_item = 1u;
                 ips200_clear();
             }
@@ -1353,6 +1404,12 @@ void Menu_Select(void)
                     // 航点查看
                     s_ui_page = UI_PAGE_KKF_INS_PATH_VIEW;
                     s_kkf_ins_path_page = 0u;
+                    ips200_clear();
+                }
+                else if (s_kkf_main_item == 15u)
+                {
+                    gps_storage_start();
+                    s_ui_page = UI_PAGE_KKF_GPS_STORAGE;
                     ips200_clear();
                 }
                 else
@@ -1437,7 +1494,7 @@ void Menu_Select(void)
         }
         else if (s_ui_page == UI_PAGE_KKF_GPS_DEBUG)
         {
-            // GPS 调试菜单：KEY1 上 / KEY3 下 / KEY2 确认（暂为空动作） / KEY4 返回
+            // GPS 调试菜单：KEY1 下 / KEY3 上 / KEY2 确认 / KEY4 返回
             if (KEY4_PRES == key)
             {
                 s_ui_page = UI_PAGE_KKF_MAIN;
@@ -1446,43 +1503,89 @@ void Menu_Select(void)
             else if (KEY3_PRES == key)
             {
                 if (s_kkf_gps_item > 1u) s_kkf_gps_item--;
-                else s_kkf_gps_item = 4u;
+                else s_kkf_gps_item = 5u;
                 ips200_clear();
             }
             else if (KEY1_PRES == key)
             {
-                if (s_kkf_gps_item < 4u) s_kkf_gps_item++;
+                if (s_kkf_gps_item < 5u) s_kkf_gps_item++;
                 else s_kkf_gps_item = 1u;
                 ips200_clear();
             }
             else if (KEY2_PRES == key)
             {
-                // GPS 选项确认：1=保存点；2=显示路线（切到专门界面）；3=显示航向（切到专门界面）；4=清屏
                 if (s_kkf_gps_item == 1u)
                 {
-                    // 保存点并在同一行显示确认
                     ttop_gps_save_point();
-                    ips200_show_uint(16 * 8, (uint16)((uint16)s_kkf_gps_item * 15u), gps_saved_point_count, 3);//gps_test_count,gps_saved_point_count
-
-
+                    ips200_show_uint(16 * 8, (uint16)((uint16)s_kkf_gps_item * 15u), gps_saved_point_count, 3);
                 }
                 else if (s_kkf_gps_item == 2u)
                 {
-                    // 进入路线显示界面，由专门的绘制函数负责绘制
                     s_ui_page = UI_PAGE_KKF_GPS_ROUTE;
                     ips200_clear();
                 }
                 else if (s_kkf_gps_item == 3u)
                 {
-                    // 进入航向显示界面
                     s_ui_page = UI_PAGE_KKF_GPS_HEADINGS;
+                    ips200_clear();
+                }
+                else if (s_kkf_gps_item == 4u)
+                {
+                    // 进入单点绕圈调试页
+                    s_ui_page = UI_PAGE_KKF_GPS_CIRCLE;
+                    s_kkf_gps_circle_item = 1u;
                     ips200_clear();
                 }
                 else
                 {
-                    // 第4项：清屏并显示帮助
+                    // 第5项：清屏并显示帮助
                     ttop_gps_clear_and_show_help();
                 }
+            }
+        }
+        else if (s_ui_page == UI_PAGE_KKF_GPS_CIRCLE)
+        {
+            if (KEY4_PRES == key)
+            {
+                s_ui_page = UI_PAGE_KKF_GPS_DEBUG;
+                ips200_clear();
+            }
+            else if (KEY3_PRES == key)
+            {
+                if (s_kkf_gps_circle_item > 1u) s_kkf_gps_circle_item--;
+                else s_kkf_gps_circle_item = 5u;
+                ips200_clear();
+            }
+            else if (KEY1_PRES == key)
+            {
+                if (s_kkf_gps_circle_item < 5u) s_kkf_gps_circle_item++;
+                else s_kkf_gps_circle_item = 1u;
+                ips200_clear();
+            }
+            else if (KEY2_PRES == key)
+            {
+                if (s_kkf_gps_circle_item == 1u)
+                    gps_nav_circle_save_center();
+                else if (s_kkf_gps_circle_item == 2u)
+                    gps_nav_circle_start();
+                else if (s_kkf_gps_circle_item == 3u)
+                    gps_nav_circle_stop();
+                else if (s_kkf_gps_circle_item == 4u)
+                    gps_nav_circle_toggle_dir();
+                else
+                {
+                    s_ui_page = UI_PAGE_KKF_GPS_DEBUG;
+                }
+                ips200_clear();
+            }
+        }
+        else if (s_ui_page == UI_PAGE_KKF_GPS_STORAGE)
+        {
+            if (KEY4_PRES == key || KEY2_PRES == key)
+            {
+                gps_storage_stop();
+                s_ui_page = UI_PAGE_KKF_MAIN;
+                ips200_clear();
             }
         }
         else if (s_ui_page == UI_PAGE_KKF_PARAM)
