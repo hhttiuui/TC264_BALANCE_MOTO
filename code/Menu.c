@@ -21,6 +21,7 @@
 #include "ttop_speed_change.h"
 #include "ttop_kemu1.h"
 #include "ttop_kemu3.h"
+#include "roll_slope_speed.h"
 #include "ins_dead_reckoning.h"
 #include "ins_path_follow.h"
 #include "gps_display.h"
@@ -51,6 +52,9 @@ typedef enum
     UI_PAGE_KKF_DYN_PID = 19,        // 界面1_1_11：动态 PID 参数显示
     UI_PAGE_KKF_KEY_DBG = 20,        // 界面1_1_12：按键状态调试（KEY1/2/3）
     UI_PAGE_KKF_KEMU1_DBG = 21,      // 界面1_1_13：kemu1 段表调试
+    UI_PAGE_KKF_KEMU3_DBG = 30,      // 界面1_1_15：kemu3 子菜单
+    UI_PAGE_KKF_KEMU3_PATH = 31,     // kemu3 路径参数
+    UI_PAGE_KKF_SLOPE_DBG = 32,      // 坡道速度参数
     UI_PAGE_KKF_SPCH_DBG = 27,       // 界面1_1_14：速度变化调试
     UI_PAGE_KKF_GPS_CIRCLE = 28,     // 界面：单点绕圈 GPS 调试
     UI_PAGE_KKF_GPS_STORAGE = 29,    // 界面：GPS 实时存点轨迹显示
@@ -97,7 +101,7 @@ static volatile uint16 s_kkf_ins_path_page = 0u;
 
 // eight2 段表选择：当前选择（用于显示/编辑哪一套段表）
 static volatile ttop_eight2_prog_id_t s_kkf_eight2_prog_id = TTOP_EIGHT2_PROG_MAIN;
-static volatile uint8 s_kkf_eight2_prog_item = 1u; // 1..3
+static volatile uint8 s_kkf_eight2_prog_item = 1u; // 1..8
 
 static volatile ttop_eight2_seg_t *kkf_eight2_prog_ptr(ttop_eight2_prog_id_t id)
 {
@@ -105,6 +109,11 @@ static volatile ttop_eight2_seg_t *kkf_eight2_prog_ptr(ttop_eight2_prog_id_t id)
     {
         case TTOP_EIGHT2_PROG_EX1: return (volatile ttop_eight2_seg_t *)g_eight2_prog_ex1;
         case TTOP_EIGHT2_PROG_EX2: return (volatile ttop_eight2_seg_t *)g_eight2_prog_ex2;
+        case TTOP_EIGHT2_PROG_EX3: return (volatile ttop_eight2_seg_t *)g_eight2_prog_ex3;
+        case TTOP_EIGHT2_PROG_EX4: return (volatile ttop_eight2_seg_t *)g_eight2_prog_ex4;
+        case TTOP_EIGHT2_PROG_EX5: return (volatile ttop_eight2_seg_t *)g_eight2_prog_ex5;
+        case TTOP_EIGHT2_PROG_EX6: return (volatile ttop_eight2_seg_t *)g_eight2_prog_ex6;
+        case TTOP_EIGHT2_PROG_EX7: return (volatile ttop_eight2_seg_t *)g_eight2_prog_ex7;
         case TTOP_EIGHT2_PROG_MAIN:
         default: return (volatile ttop_eight2_seg_t *)g_eight2_prog;
     }
@@ -116,6 +125,11 @@ static const char *kkf_eight2_prog_str(ttop_eight2_prog_id_t id)
     {
         case TTOP_EIGHT2_PROG_EX1: return "EX1";
         case TTOP_EIGHT2_PROG_EX2: return "EX2";
+        case TTOP_EIGHT2_PROG_EX3: return "EX3";
+        case TTOP_EIGHT2_PROG_EX4: return "EX4";
+        case TTOP_EIGHT2_PROG_EX5: return "EX5";
+        case TTOP_EIGHT2_PROG_EX6: return "EX6";
+        case TTOP_EIGHT2_PROG_EX7: return "EX7";
         case TTOP_EIGHT2_PROG_MAIN:
         default: return "MAIN";
     }
@@ -225,6 +239,42 @@ static volatile uint8 s_kkf_kemu1_item = 0u; // 0=counts_per_meter, 1..5=seg0..4
 
 typedef enum
 {
+    KKF_KEMU3_SEL = 0u,          // '>' 选择行
+    KKF_KEMU3_EDIT_METERS = 1u,  // '-' 编辑左列（距离）
+    KKF_KEMU3_EDIT_SPEED = 2u,   // '*' 编辑右列（速度）
+} kkf_kemu3_state_t;
+
+static volatile kkf_kemu3_state_t s_kkf_kemu3_state = KKF_KEMU3_SEL;
+static volatile uint8 s_kkf_kemu3_item = 0u; // 0=counts_per_meter, 1..8=seg0..7
+static volatile uint8 s_kkf_kemu3_menu_item = 1u; // 1..4
+static volatile uint8 s_kkf_kemu3_dbg_edit = 0u;  // 0=select, 1=edit end deg, 2=edit end dps, 3=edit EX2 loop
+
+typedef enum
+{
+    KKF_SLOPE_FIELD_ENABLE = 1u,
+    KKF_SLOPE_FIELD_DIST,
+    KKF_SLOPE_FIELD_UP_START,
+    KKF_SLOPE_FIELD_UP_END,
+    KKF_SLOPE_FIELD_DOWN_START,
+    KKF_SLOPE_FIELD_DOWN_END,
+    KKF_SLOPE_FIELD_UP_DELTA,
+    KKF_SLOPE_FIELD_PRE_UP_DECEL,
+    KKF_SLOPE_FIELD_CREST_DELTA,
+    KKF_SLOPE_FIELD_FLAT_DELTA,
+    KKF_SLOPE_FIELD_COUNT = KKF_SLOPE_FIELD_FLAT_DELTA,
+} kkf_slope_field_t;
+
+typedef enum
+{
+    KKF_SLOPE_STATE_SEL = 0u,
+    KKF_SLOPE_STATE_EDIT = 1u,
+} kkf_slope_state_t;
+
+static volatile kkf_slope_state_t s_kkf_slope_state = KKF_SLOPE_STATE_SEL;
+static volatile uint8 s_kkf_slope_item = 1u;
+
+typedef enum
+{
     KKF_SPCH_FIELD_FIT_MODE = 1u,
     KKF_SPCH_FIELD_LPF_ALPHA,
     KKF_SPCH_FIELD_COUNT = KKF_SPCH_FIELD_LPF_ALPHA,
@@ -324,17 +374,19 @@ static void kkf_main_draw(void)
     ips200_show_float(16 * 6, 10 * 15, g_yaw_target_deg, 8, 2);//eight_count
     ips200_show_string(16, 11 * 15, "pitch:");
     ips200_show_float(16 * 6, 11 * 15, show_pitch_deg, 8, 2);
-    ips200_show_string(16, 12 * 15, "SPD:");
-    ips200_show_int(16 * 6, 12 * 15, motor_speed_raw_counts, 6);
+    ips200_show_string(16, 12 * 15, "roll:");
+    ips200_show_float(16 * 6, 12 * 15, show_roll_deg, 8, 2);
+    ips200_show_string(16, 13 * 15, "SPD:");
+    ips200_show_int(16 * 6, 13 * 15, motor_speed_raw_counts, 6);
 
-    ips200_show_string(16, 13 * 15, "xy:");
-    ips200_show_float(16 * 3, 13 * 15, ins_dr_get_pos_x(), 2, 3);
-    ips200_show_float(16 * 8, 13 * 15, ins_dr_get_pos_y(), 2, 3);
+    ips200_show_string(16, 14 * 15, "xy:");
+    ips200_show_float(16 * 3, 14 * 15, ins_dr_get_pos_x(), 2, 3);
+    ips200_show_float(16 * 8, 14 * 15, ins_dr_get_pos_y(), 2, 3);
 
-    ips200_show_string(16, 14 * 15, "g_ins_path");
+    ips200_show_string(16, 15 * 15, "g_ins_path");
 
-    ips200_show_string(16, 15 * 15, "GPSStorage:");
-    ips200_show_string(16 * 12, 15 * 15, gps_storage_is_recording() ? "on" : "off");
+    ips200_show_string(16, 16 * 15, "GPSStorage:");
+    ips200_show_string(16 * 12, 16 * 15, gps_storage_is_recording() ? "on" : "off");
 
     ips200_show_string(0, s_kkf_main_item * 15, "> ");
 
@@ -425,6 +477,7 @@ static void kkf_param_draw(void)
     //   KEY_DBG（按键状态）
     //   SPCH_DBG（速度变化调试）
     //   KEMU1_DBG（kemu1 段表）
+    //   KEMU3_DBG（kemu3 段表）
     ips200_show_string(0, 0 * 15, "KOU_KOU_FLY_CAR");
     ips200_show_string(16, 1 * 15, "MODE SEL:");
     ips200_show_string(16 * 8, 1 * 15, (char *)kkf_mode_str(s_kkf_mode));
@@ -439,6 +492,7 @@ static void kkf_param_draw(void)
     ips200_show_string(16, 8 * 15, "KEY_DBG");
     ips200_show_string(16, 9 * 15, "SPCH_DBG");
     ips200_show_string(16, 10 * 15, "KEMU1_DBG");
+    ips200_show_string(16, 11 * 15, "KEMU3_DBG");
 
     ips200_show_string(0, s_kkf_param_item * 15, "> ");
 
@@ -585,6 +639,138 @@ static void kkf_kemu1_dbg_draw(void)
     kkf_draw_signature_bottom();
 }
 
+static void kkf_kemu3_dbg_draw(void)
+{
+    char cursor[3] = "> ";
+    ips200_show_string(0, 0 * 15, "KOU_KOU_FLY_CAR");
+    ips200_show_string(16, 1 * 15, "KEMU3_DBG");
+
+    ips200_show_string(16, 2 * 15, "KM3_PATH");
+    ips200_show_string(16, 3 * 15, "END:");
+    ips200_show_float(16 * 4, 3 * 15, g_ttop_kemu3_end_seg.target_rel_deg, 6, 1);
+    ips200_show_float(16 * 9, 3 * 15, g_ttop_kemu3_end_seg.rate_dps, 6, 1);
+    ips200_show_string(16, 4 * 15, "EX2_LOOP:");
+    ips200_show_int(16 * 9, 4 * 15, (int32)g_ttop_kemu3_ex2_loop_count, 3);
+    ips200_show_string(16, 5 * 15, "SLOPE_DBG");
+
+    if (s_kkf_kemu3_dbg_edit == 1u) cursor[0] = '-';
+    else if (s_kkf_kemu3_dbg_edit == 2u) cursor[0] = '*';
+    else if (s_kkf_kemu3_dbg_edit == 3u) cursor[0] = '-';
+    ips200_show_string(0, (uint16)((1u + (uint16)s_kkf_kemu3_menu_item) * 15u), cursor);
+
+    kkf_draw_signature_bottom();
+}
+
+static void kkf_kemu3_path_draw(void)
+{
+    uint8 i;
+    char cursor[3] = ">";
+
+    ips200_show_string(0, 0 * 15, "KOU_KOU_FLY_CAR");
+    ips200_show_string(16, 1 * 15, "KM3_PATH");
+
+    if (s_kkf_kemu3_state == KKF_KEMU3_SEL)
+    {
+        cursor[0] = '>';
+    }
+    else if (s_kkf_kemu3_state == KKF_KEMU3_EDIT_METERS)
+    {
+        cursor[0] = '-';
+    }
+    else
+    {
+        cursor[0] = '*';
+    }
+
+    // 首行：1m 对应计数
+    if (s_kkf_kemu3_item == 0u)
+    {
+        ips200_show_string(0, 2 * 15, cursor);
+    }
+    else
+    {
+        ips200_show_string(0, 2 * 15, " ");
+    }
+    ips200_show_string(16, 2 * 15, "CNT_1M:");
+    ips200_show_int(16 * 8, 2 * 15, (int32)g_ttop_kemu3_counts_per_meter, 6);
+
+    // 后八行：段号 + 类型 + 距离 + 速度
+    for (i = 0u; i < (uint8)TTOP_KEMU3_SEG_COUNT; i++)
+    {
+        uint16 y = (uint16)((3u + (uint16)i) * 15u);
+        uint8 row_item = (uint8)(i + 1u);
+
+        if (s_kkf_kemu3_item == row_item)
+        {
+            ips200_show_string(0, y, cursor);
+        }
+        else
+        {
+            ips200_show_string(0, y, " ");
+        }
+
+        ips200_show_int(16 * 1, y, (int32)i, 1);
+        if (g_ttop_kemu3_seg_table[i].seg_type == TTOP_KEMU3_SEG_TURN)
+        {
+            ips200_show_string(16 * 2, y, "T");
+            ips200_show_int(16 * 3, y, (int32)g_ttop_kemu3_seg_table[i].turn_prog_id, 1);
+        }
+        else
+        {
+            ips200_show_string(16 * 2, y, "S");
+        }
+
+        ips200_show_float(16 * 4, y, g_ttop_kemu3_seg_table[i].meters, 5, 2);
+        ips200_show_int(16 * 9, y, (int32)g_ttop_kemu3_seg_table[i].speed_counts_5ms, 5);
+    }
+
+    kkf_draw_signature_bottom();
+}
+
+static void kkf_slope_dbg_draw(void)
+{
+    const roll_slope_speed_cfg_t *cfg = roll_slope_speed_get_cfg();
+    char cursor[3] = ">";
+    if (s_kkf_slope_state == KKF_SLOPE_STATE_EDIT) cursor[0] = '-';
+
+    ips200_show_string(0, 0 * 15, "KOU_KOU_FLY_CAR");
+    ips200_show_string(16, 1 * 15, "SLOPE_DBG");
+
+    ips200_show_string(16, 2 * 15, "EN:");
+    ips200_show_string(16 * 7, 2 * 15, roll_slope_speed_get_enabled() ? "ON" : "OFF");
+
+    ips200_show_string(16, 3 * 15, "DIST:");
+    ips200_show_float(16 * 7, 3 * 15, cfg->pre_up_decel_m, 5, 1);
+
+    ips200_show_string(16, 4 * 15, "UP_ST:");
+    ips200_show_float(16 * 7, 4 * 15, cfg->up_start_deg, 5, 2);
+
+    ips200_show_string(16, 5 * 15, "UP_ED:");
+    ips200_show_float(16 * 7, 5 * 15, cfg->up_end_deg, 5, 2);
+
+    ips200_show_string(16, 6 * 15, "DN_ST:");
+    ips200_show_float(16 * 7, 6 * 15, cfg->down_start_deg, 5, 2);
+
+    ips200_show_string(16, 7 * 15, "DN_ED:");
+    ips200_show_float(16 * 7, 7 * 15, cfg->down_end_deg, 5, 2);
+
+    ips200_show_string(16, 8 * 15, "UP_D:");
+    ips200_show_int(16 * 7, 8 * 15, (int32)cfg->up_delta_counts, 6);
+
+    ips200_show_string(16, 9 * 15, "PUP_D:");
+    ips200_show_int(16 * 7, 9 * 15, (int32)cfg->pre_up_decel_counts, 6);
+
+    ips200_show_string(16, 10 * 15, "CR_D:");
+    ips200_show_int(16 * 7, 10 * 15, (int32)cfg->crest_delta_counts, 6);
+
+    ips200_show_string(16, 11 * 15, "FL_D:");
+    ips200_show_int(16 * 7, 11 * 15, (int32)cfg->flat_delta_counts, 6);
+
+    ips200_show_string(0, (uint16)((1u + (uint16)s_kkf_slope_item) * 15u), cursor);
+
+    kkf_draw_signature_bottom();
+}
+
 static void kkf_con_dbg_draw(void)
 {
     ips200_show_string(0, 0 * 15, "KOU_KOU_FLY_CAR");
@@ -718,6 +904,11 @@ static void kkf_eight2_prog_select_draw(void)
     ips200_show_string(16, 2 * 15, "MAIN");
     ips200_show_string(16, 3 * 15, "EX1");
     ips200_show_string(16, 4 * 15, "EX2");
+    ips200_show_string(16, 5 * 15, "EX3");
+    ips200_show_string(16, 6 * 15, "EX4");
+    ips200_show_string(16, 7 * 15, "EX5");
+    ips200_show_string(16, 8 * 15, "EX6");
+    ips200_show_string(16, 9 * 15, "EX7");
 
     ips200_show_string(0, (uint16)((1u + (uint16)s_kkf_eight2_prog_item) * 15u), "> ");
 
@@ -1008,6 +1199,113 @@ static void kkf_kemu1_adjust_counts_per_meter(int8 dir)
     ttop_kemu1_rebuild_targets();
 }
 
+static void kkf_kemu3_adjust_meters(uint8 idx, int8 dir)
+{
+    float v;
+    if (idx >= (uint8)TTOP_KEMU3_SEG_COUNT) return;
+
+    v = g_ttop_kemu3_seg_table[idx].meters;
+    v += (dir > 0) ? 0.1f : -0.1f;
+    if (v < 0.0f) v = 0.0f;
+    if (v > 999.0f) v = 999.0f;
+    g_ttop_kemu3_seg_table[idx].meters = v;
+
+    ttop_kemu3_rebuild_targets();
+}
+
+static void kkf_kemu3_adjust_speed(uint8 idx, int8 dir)
+{
+    int32 v;
+    if (idx >= (uint8)TTOP_KEMU3_SEG_COUNT) return;
+
+    v = (int32)g_ttop_kemu3_seg_table[idx].speed_counts_5ms + ((dir > 0) ? 1 : -1);
+    if (v < 0) v = 0;
+    if (v > 2000) v = 2000;
+    g_ttop_kemu3_seg_table[idx].speed_counts_5ms = (short)v;
+}
+
+static void kkf_kemu3_adjust_counts_per_meter(int8 dir)
+{
+    int32 v = (int32)g_ttop_kemu3_counts_per_meter + ((dir > 0) ? 1 : -1);
+    if (v < 1) v = 1;
+    if (v > 99999) v = 99999;
+    g_ttop_kemu3_counts_per_meter = (int)v;
+
+    ttop_kemu3_rebuild_targets();
+}
+
+static void kkf_slope_adjust_value(kkf_slope_field_t field, int8 dir)
+{
+    roll_slope_speed_cfg_t cfg = *roll_slope_speed_get_cfg();
+
+    if (field == KKF_SLOPE_FIELD_ENABLE)
+    {
+        roll_slope_speed_set_enabled((dir > 0) ? 1u : 0u);
+        return;
+    }
+    else if (field == KKF_SLOPE_FIELD_DIST)
+    {
+        float v = cfg.pre_up_decel_m + ((dir > 0) ? 0.1f : -0.1f);
+        if (v < 0.0f) v = 0.0f;
+        if (v > 999.0f) v = 999.0f;
+        cfg.pre_up_decel_m = v;
+    }
+    else if (field == KKF_SLOPE_FIELD_UP_START)
+    {
+        cfg.up_start_deg += (dir > 0) ? 0.1f : -0.1f;
+        if (cfg.up_start_deg < 0.0f) cfg.up_start_deg = 0.0f;
+        if (cfg.up_start_deg > 90.0f) cfg.up_start_deg = 90.0f;
+    }
+    else if (field == KKF_SLOPE_FIELD_UP_END)
+    {
+        cfg.up_end_deg += (dir > 0) ? 0.1f : -0.1f;
+        if (cfg.up_end_deg < 0.0f) cfg.up_end_deg = 0.0f;
+        if (cfg.up_end_deg > 90.0f) cfg.up_end_deg = 90.0f;
+    }
+    else if (field == KKF_SLOPE_FIELD_DOWN_START)
+    {
+        cfg.down_start_deg += (dir > 0) ? 0.1f : -0.1f;
+        if (cfg.down_start_deg < 0.0f) cfg.down_start_deg = 0.0f;
+        if (cfg.down_start_deg > 90.0f) cfg.down_start_deg = 90.0f;
+    }
+    else if (field == KKF_SLOPE_FIELD_DOWN_END)
+    {
+        cfg.down_end_deg += (dir > 0) ? 0.1f : -0.1f;
+        if (cfg.down_end_deg < 0.0f) cfg.down_end_deg = 0.0f;
+        if (cfg.down_end_deg > 90.0f) cfg.down_end_deg = 90.0f;
+    }
+    else if (field == KKF_SLOPE_FIELD_UP_DELTA)
+    {
+        int32 v = (int32)cfg.up_delta_counts + ((dir > 0) ? 1 : -1);
+        if (v < -2000) v = -2000;
+        if (v > 2000) v = 2000;
+        cfg.up_delta_counts = (int16)v;
+    }
+    else if (field == KKF_SLOPE_FIELD_PRE_UP_DECEL)
+    {
+        int32 v = (int32)cfg.pre_up_decel_counts + ((dir > 0) ? 1 : -1);
+        if (v > 2000) v = 2000;
+        if (v < -2000) v = -2000;
+        cfg.pre_up_decel_counts = (int16)v;
+    }
+    else if (field == KKF_SLOPE_FIELD_CREST_DELTA)
+    {
+        int32 v = (int32)cfg.crest_delta_counts + ((dir > 0) ? 1 : -1);
+        if (v < -2000) v = -2000;
+        if (v > 2000) v = 2000;
+        cfg.crest_delta_counts = (int16)v;
+    }
+    else
+    {
+        int32 v = (int32)cfg.flat_delta_counts + ((dir > 0) ? 1 : -1);
+        if (v < -2000) v = -2000;
+        if (v > 2000) v = 2000;
+        cfg.flat_delta_counts = (int16)v;
+    }
+
+    roll_slope_speed_set_cfg(&cfg);
+}
+
 // PID 编辑页长按加速：每次长按事件按短按步进执行 50 次
 #define KKF_PID_LONG_PRESS_EXTRA_STEPS   (50u)
 // KEMU1 编辑页长按加速：每次长按事件按短按步进执行 50 次
@@ -1053,7 +1351,8 @@ void Menu_StartAll(void)
     ttop_eight2_reset_now();
     eight_flag = 0u;
     eight_count = 0u;
-
+    roll_slope_speed_start();
+    ttop_kemu3_start();
     if (s_kkf_gps_nav_enable != 0u)
     {
         gps_nav_start();
@@ -1078,6 +1377,9 @@ void Menu_ResetAll(void)
     eight_flag = 0u;
     eight_count = 0u;
     funtion_ready_flag = 0u;
+    roll_slope_speed_reset();
+    ttop_kemu3_reset();
+    
 }
 
 void User_Interface(void)//UI显示
@@ -1129,6 +1431,18 @@ void User_Interface(void)//UI显示
         else if (s_ui_page == UI_PAGE_KKF_KEMU1_DBG)
         {
             kkf_kemu1_dbg_draw();
+        }
+        else if (s_ui_page == UI_PAGE_KKF_KEMU3_DBG)
+        {
+            kkf_kemu3_dbg_draw();
+        }
+        else if (s_ui_page == UI_PAGE_KKF_KEMU3_PATH)
+        {
+            kkf_kemu3_path_draw();
+        }
+        else if (s_ui_page == UI_PAGE_KKF_SLOPE_DBG)
+        {
+            kkf_slope_dbg_draw();
         }
 
         else if (s_ui_page == UI_PAGE_KKF_GPS_ROUTE)
@@ -1312,6 +1626,13 @@ void Menu_Select(void)
         (uint8)(s_ui_page == UI_PAGE_KKF_KEMU1_DBG &&
                 (s_kkf_kemu1_state == KKF_KEMU1_EDIT_METERS ||
                  s_kkf_kemu1_state == KKF_KEMU1_EDIT_SPEED));
+    uint8 kemu3_edit_page =
+        (uint8)(s_ui_page == UI_PAGE_KKF_KEMU3_PATH &&
+                (s_kkf_kemu3_state == KKF_KEMU3_EDIT_METERS ||
+                 s_kkf_kemu3_state == KKF_KEMU3_EDIT_SPEED));
+    uint8 slope_edit_page =
+        (uint8)(s_ui_page == UI_PAGE_KKF_SLOPE_DBG &&
+                (s_kkf_slope_state == KKF_SLOPE_STATE_EDIT));
     uint8 k1_long_evt = 0u;
     uint8 k3_long_evt = 0u;
 
@@ -1326,6 +1647,16 @@ void Menu_Select(void)
         k3_long_evt = Key_ReadLongPress(KEY_ID_3);
     }
     else if (kemu1_edit_page)
+    {
+        k1_long_evt = Key_ReadLongPress(KEY_ID_1);
+        k3_long_evt = Key_ReadLongPress(KEY_ID_3);
+    }
+    else if (kemu3_edit_page)
+    {
+        k1_long_evt = Key_ReadLongPress(KEY_ID_1);
+        k3_long_evt = Key_ReadLongPress(KEY_ID_3);
+    }
+    else if (slope_edit_page)
     {
         k1_long_evt = Key_ReadLongPress(KEY_ID_1);
         k3_long_evt = Key_ReadLongPress(KEY_ID_3);
@@ -1590,16 +1921,16 @@ void Menu_Select(void)
         }
         else if (s_ui_page == UI_PAGE_KKF_PARAM)
         {
-            // 1:MODE_SEL 2:EIGHT_TURN 3:E8_PROG 4:PID_CHANGE 5:PID_MODE 6:CON_DBG 7:DYN_PID 8:KEY_DBG 9:SPCH_DBG 10:KEMU1_DBG
+            // 1:MODE_SEL 2:EIGHT_TURN 3:E8_PROG 4:PID_CHANGE 5:PID_MODE 6:CON_DBG 7:DYN_PID 8:KEY_DBG 9:SPCH_DBG 10:KEMU1_DBG 11:KEMU3_DBG
             if (KEY3_PRES == key)
             {
                 if (s_kkf_param_item > 1u) s_kkf_param_item--;
-                else s_kkf_param_item = 10u;
+                else s_kkf_param_item = 11u;
                 ips200_clear();
             }
             else if (KEY1_PRES == key)
             {
-                if (s_kkf_param_item < 10u) s_kkf_param_item++;
+                if (s_kkf_param_item < 11u) s_kkf_param_item++;
                 else s_kkf_param_item = 1u;
                 ips200_clear();
             }
@@ -1620,10 +1951,15 @@ void Menu_Select(void)
                 else if (s_kkf_param_item == 3u)
                 {
                     s_ui_page = UI_PAGE_KKF_EIGHT2_PROG_SELECT;
-                    // 进入时光标对齐当前选择
-                    if (s_kkf_eight2_prog_id == TTOP_EIGHT2_PROG_EX1) s_kkf_eight2_prog_item = 2u;
-                    else if (s_kkf_eight2_prog_id == TTOP_EIGHT2_PROG_EX2) s_kkf_eight2_prog_item = 3u;
-                    else s_kkf_eight2_prog_item = 1u;
+                        // 进入时光标对齐当前选择（1=MAIN,2=EX1,3=EX2,4=EX3 ... 9=EX7）
+                        if (s_kkf_eight2_prog_id == TTOP_EIGHT2_PROG_EX1) s_kkf_eight2_prog_item = 2u;
+                        else if (s_kkf_eight2_prog_id == TTOP_EIGHT2_PROG_EX2) s_kkf_eight2_prog_item = 3u;
+                        else if (s_kkf_eight2_prog_id == TTOP_EIGHT2_PROG_EX3) s_kkf_eight2_prog_item = 4u;
+                        else if (s_kkf_eight2_prog_id == TTOP_EIGHT2_PROG_EX4) s_kkf_eight2_prog_item = 5u;
+                        else if (s_kkf_eight2_prog_id == TTOP_EIGHT2_PROG_EX5) s_kkf_eight2_prog_item = 6u;
+                        else if (s_kkf_eight2_prog_id == TTOP_EIGHT2_PROG_EX6) s_kkf_eight2_prog_item = 7u;
+                        else if (s_kkf_eight2_prog_id == TTOP_EIGHT2_PROG_EX7) s_kkf_eight2_prog_item = 8u;
+                        else s_kkf_eight2_prog_item = 1u;
                     ips200_clear();
                 }
                 else if (s_kkf_param_item == 4u)
@@ -1668,6 +2004,12 @@ void Menu_Select(void)
                     s_ui_page = UI_PAGE_KKF_KEMU1_DBG;
                     s_kkf_kemu1_item = 0u;
                     s_kkf_kemu1_state = KKF_KEMU1_SEL;
+                    ips200_clear();
+                }
+                else if (s_kkf_param_item == 11u)
+                {
+                    s_ui_page = UI_PAGE_KKF_KEMU3_DBG;
+                    s_kkf_kemu3_menu_item = 1u;
                     ips200_clear();
                 }
                 else
@@ -1768,7 +2110,7 @@ void Menu_Select(void)
                     uint8 i;
                     for (i = 0u; i < KKF_EIGHT_TURN_LONG_PRESS_EXTRA_STEPS; i++)
                     {
-                        prog[idx].rate_dps -= 1.0f;
+                        prog[idx].rate_dps -= 0.1f;
                     }
                     ips200_clear();
                 }
@@ -1777,18 +2119,18 @@ void Menu_Select(void)
                     uint8 i;
                     for (i = 0u; i < KKF_EIGHT_TURN_LONG_PRESS_EXTRA_STEPS; i++)
                     {
-                        prog[idx].rate_dps += 1.0f;
+                        prog[idx].rate_dps += 0.1f;
                     }
                     ips200_clear();
                 }
                 else if (KEY1_PRES == key)
                 {
-                    prog[idx].rate_dps -= 1.0f;
+                    prog[idx].rate_dps -= 0.1f;
                     ips200_clear();
                 }
                 else if (KEY3_PRES == key)
                 {
-                    prog[idx].rate_dps += 1.0f;
+                    prog[idx].rate_dps += 0.1f;
                     ips200_clear();
                 }
                 else if (KEY2_PRES == key)
@@ -1810,12 +2152,12 @@ void Menu_Select(void)
             else if (KEY3_PRES == key)
             {
                 if (s_kkf_eight2_prog_item > 1u) s_kkf_eight2_prog_item--;
-                else s_kkf_eight2_prog_item = 3u;
+                else s_kkf_eight2_prog_item = 8u;
                 ips200_clear();
             }
             else if (KEY1_PRES == key)
             {
-                if (s_kkf_eight2_prog_item < 3u) s_kkf_eight2_prog_item++;
+                if (s_kkf_eight2_prog_item < 8u) s_kkf_eight2_prog_item++;
                 else s_kkf_eight2_prog_item = 1u;
                 ips200_clear();
             }
@@ -1823,6 +2165,11 @@ void Menu_Select(void)
             {
                 if (s_kkf_eight2_prog_item == 2u) s_kkf_eight2_prog_id = TTOP_EIGHT2_PROG_EX1;
                 else if (s_kkf_eight2_prog_item == 3u) s_kkf_eight2_prog_id = TTOP_EIGHT2_PROG_EX2;
+                else if (s_kkf_eight2_prog_item == 4u) s_kkf_eight2_prog_id = TTOP_EIGHT2_PROG_EX3;
+                else if (s_kkf_eight2_prog_item == 5u) s_kkf_eight2_prog_id = TTOP_EIGHT2_PROG_EX4;
+                else if (s_kkf_eight2_prog_item == 6u) s_kkf_eight2_prog_id = TTOP_EIGHT2_PROG_EX5;
+                else if (s_kkf_eight2_prog_item == 7u) s_kkf_eight2_prog_id = TTOP_EIGHT2_PROG_EX6;
+                else if (s_kkf_eight2_prog_item == 8u) s_kkf_eight2_prog_id = TTOP_EIGHT2_PROG_EX7;
                 else s_kkf_eight2_prog_id = TTOP_EIGHT2_PROG_MAIN;
 
                 // 同步到八字模块：运行时从选中段表输出 g_yaw_target_deg
@@ -2101,6 +2448,345 @@ void Menu_Select(void)
                 else if (KEY2_PRES == key)
                 {
                     s_kkf_kemu1_state = KKF_KEMU1_SEL;
+                    ips200_clear();
+                }
+            }
+        }
+        else if (s_ui_page == UI_PAGE_KKF_KEMU3_DBG)
+        {
+            // kemu3_dbg：子菜单
+            // - KEY1/KEY3 选择 KM3_PATH / END / EX2_LOOP / SLOPE_DBG
+            // - KEY2 进入/切换编辑
+            // - KEY4 返回参数页
+
+            if (KEY4_PRES == key)
+            {
+                if (s_kkf_kemu3_dbg_edit != 0u)
+                {
+                    s_kkf_kemu3_dbg_edit = 0u;
+                }
+                else
+                {
+                    s_ui_page = UI_PAGE_KKF_PARAM;
+                }
+                ips200_clear();
+            }
+            else if (s_kkf_kemu3_dbg_edit != 0u)
+            {
+                if (s_kkf_kemu3_dbg_edit == 1u)
+                {
+                    if (KEY1_PRES == key)
+                    {
+                        g_ttop_kemu3_end_seg.target_rel_deg -= 1.0f;
+                        ips200_clear();
+                    }
+                    else if (KEY3_PRES == key)
+                    {
+                        g_ttop_kemu3_end_seg.target_rel_deg += 1.0f;
+                        ips200_clear();
+                    }
+                    else if (KEY2_PRES == key)
+                    {
+                        s_kkf_kemu3_dbg_edit = 2u;
+                        ips200_clear();
+                    }
+                }
+                else if (s_kkf_kemu3_dbg_edit == 2u)
+                {
+                    if (KEY1_PRES == key)
+                    {
+                        g_ttop_kemu3_end_seg.rate_dps -= 0.1f;
+                        if (g_ttop_kemu3_end_seg.rate_dps < 0.0f) g_ttop_kemu3_end_seg.rate_dps = 0.0f;
+                        ips200_clear();
+                    }
+                    else if (KEY3_PRES == key)
+                    {
+                        g_ttop_kemu3_end_seg.rate_dps += 0.1f;
+                        ips200_clear();
+                    }
+                    else if (KEY2_PRES == key)
+                    {
+                        s_kkf_kemu3_dbg_edit = 0u;
+                        ips200_clear();
+                    }
+                }
+                else
+                {
+                    if (KEY1_PRES == key)
+                    {
+                        if (g_ttop_kemu3_ex2_loop_count > 0u) g_ttop_kemu3_ex2_loop_count--;
+                        ips200_clear();
+                    }
+                    else if (KEY3_PRES == key)
+                    {
+                        if (g_ttop_kemu3_ex2_loop_count < 5u) g_ttop_kemu3_ex2_loop_count++;
+                        ips200_clear();
+                    }
+                    else if (KEY2_PRES == key)
+                    {
+                        s_kkf_kemu3_dbg_edit = 0u;
+                        ips200_clear();
+                    }
+                }
+            }
+            else if (KEY3_PRES == key)
+            {
+                if (s_kkf_kemu3_menu_item > 1u) s_kkf_kemu3_menu_item--;
+                else s_kkf_kemu3_menu_item = 4u;
+                ips200_clear();
+            }
+            else if (KEY1_PRES == key)
+            {
+                if (s_kkf_kemu3_menu_item < 4u) s_kkf_kemu3_menu_item++;
+                else s_kkf_kemu3_menu_item = 1u;
+                ips200_clear();
+            }
+            else if (KEY2_PRES == key)
+            {
+                if (s_kkf_kemu3_menu_item == 1u)
+                {
+                    s_ui_page = UI_PAGE_KKF_KEMU3_PATH;
+                    s_kkf_kemu3_item = 0u;
+                    s_kkf_kemu3_state = KKF_KEMU3_SEL;
+                }
+                else if (s_kkf_kemu3_menu_item == 2u)
+                {
+                    s_kkf_kemu3_dbg_edit = 1u;
+                }
+                else if (s_kkf_kemu3_menu_item == 3u)
+                {
+                    s_kkf_kemu3_dbg_edit = 3u;
+                }
+                else
+                {
+                    s_ui_page = UI_PAGE_KKF_SLOPE_DBG;
+                    s_kkf_slope_item = 1u;
+                    s_kkf_slope_state = KKF_SLOPE_STATE_SEL;
+                }
+                ips200_clear();
+            }
+        }
+        else if (s_ui_page == UI_PAGE_KKF_KEMU3_PATH)
+        {
+            // kemu3_dbg：
+            // - 选择态('>')：KEY1/KEY3 选择 0..8 行（0=1m计数，1..8=段）
+            // - 编辑左列('-')：KEY1 减，KEY3 加；KEY2：
+            //     item=0 -> 回选择态；item=1..8 -> 进编辑右列
+            // - 编辑右列('*')：KEY1 减，KEY3 加；KEY2 回选择态
+            // - KEY4：返回 KEMU3 子菜单
+
+            if (KEY4_PRES == key)
+            {
+                s_ui_page = UI_PAGE_KKF_KEMU3_DBG;
+                s_kkf_kemu3_state = KKF_KEMU3_SEL;
+                ips200_clear();
+            }
+            else if (s_kkf_kemu3_state == KKF_KEMU3_SEL)
+            {
+                if (KEY3_PRES == key)
+                {
+                    if (s_kkf_kemu3_item > 0u) s_kkf_kemu3_item--;
+                    else s_kkf_kemu3_item = (uint8)TTOP_KEMU3_SEG_COUNT;
+                    ips200_clear();
+                }
+                else if (KEY1_PRES == key)
+                {
+                    if (s_kkf_kemu3_item < (uint8)TTOP_KEMU3_SEG_COUNT) s_kkf_kemu3_item++;
+                    else s_kkf_kemu3_item = 0u;
+                    ips200_clear();
+                }
+                else if (KEY2_PRES == key)
+                {
+                    s_kkf_kemu3_state = KKF_KEMU3_EDIT_METERS;
+                    ips200_clear();
+                }
+            }
+            else if (s_kkf_kemu3_state == KKF_KEMU3_EDIT_METERS)
+            {
+                if (k1_long_evt && k1_now)
+                {
+                    uint8 i;
+                    for (i = 0u; i < KKF_KEMU1_LONG_PRESS_EXTRA_STEPS; i++)
+                    {
+                        if (s_kkf_kemu3_item == 0u)
+                        {
+                            kkf_kemu3_adjust_counts_per_meter(-1);
+                        }
+                        else
+                        {
+                            kkf_kemu3_adjust_meters((uint8)(s_kkf_kemu3_item - 1u), -1);
+                        }
+                    }
+                    ips200_clear();
+                }
+                else if (k3_long_evt && k3_now)
+                {
+                    uint8 i;
+                    for (i = 0u; i < KKF_KEMU1_LONG_PRESS_EXTRA_STEPS; i++)
+                    {
+                        if (s_kkf_kemu3_item == 0u)
+                        {
+                            kkf_kemu3_adjust_counts_per_meter(+1);
+                        }
+                        else
+                        {
+                            kkf_kemu3_adjust_meters((uint8)(s_kkf_kemu3_item - 1u), +1);
+                        }
+                    }
+                    ips200_clear();
+                }
+                else if (KEY1_PRES == key)
+                {
+                    if (s_kkf_kemu3_item == 0u)
+                    {
+                        kkf_kemu3_adjust_counts_per_meter(-1);
+                    }
+                    else
+                    {
+                        kkf_kemu3_adjust_meters((uint8)(s_kkf_kemu3_item - 1u), -1);
+                    }
+                    ips200_clear();
+                }
+                else if (KEY3_PRES == key)
+                {
+                    if (s_kkf_kemu3_item == 0u)
+                    {
+                        kkf_kemu3_adjust_counts_per_meter(+1);
+                    }
+                    else
+                    {
+                        kkf_kemu3_adjust_meters((uint8)(s_kkf_kemu3_item - 1u), +1);
+                    }
+                    ips200_clear();
+                }
+                else if (KEY2_PRES == key)
+                {
+                    if (s_kkf_kemu3_item == 0u)
+                    {
+                        s_kkf_kemu3_state = KKF_KEMU3_SEL;
+                    }
+                    else
+                    {
+                        s_kkf_kemu3_state = KKF_KEMU3_EDIT_SPEED;
+                    }
+                    ips200_clear();
+                }
+            }
+            else // KKF_KEMU3_EDIT_SPEED
+            {
+                if (k1_long_evt && k1_now)
+                {
+                    if (s_kkf_kemu3_item > 0u)
+                    {
+                        uint8 i;
+                        for (i = 0u; i < KKF_KEMU1_LONG_PRESS_EXTRA_STEPS; i++)
+                        {
+                            kkf_kemu3_adjust_speed((uint8)(s_kkf_kemu3_item - 1u), -1);
+                        }
+                    }
+                    ips200_clear();
+                }
+                else if (k3_long_evt && k3_now)
+                {
+                    if (s_kkf_kemu3_item > 0u)
+                    {
+                        uint8 i;
+                        for (i = 0u; i < KKF_KEMU1_LONG_PRESS_EXTRA_STEPS; i++)
+                        {
+                            kkf_kemu3_adjust_speed((uint8)(s_kkf_kemu3_item - 1u), +1);
+                        }
+                    }
+                    ips200_clear();
+                }
+                else if (KEY1_PRES == key)
+                {
+                    if (s_kkf_kemu3_item > 0u)
+                    {
+                        kkf_kemu3_adjust_speed((uint8)(s_kkf_kemu3_item - 1u), -1);
+                    }
+                    ips200_clear();
+                }
+                else if (KEY3_PRES == key)
+                {
+                    if (s_kkf_kemu3_item > 0u)
+                    {
+                        kkf_kemu3_adjust_speed((uint8)(s_kkf_kemu3_item - 1u), +1);
+                    }
+                    ips200_clear();
+                }
+                else if (KEY2_PRES == key)
+                {
+                    s_kkf_kemu3_state = KKF_KEMU3_SEL;
+                    ips200_clear();
+                }
+            }
+        }
+        else if (s_ui_page == UI_PAGE_KKF_SLOPE_DBG)
+        {
+            // slope_dbg：
+            // - 选择态('>')：KEY1/KEY3 选择 1..7 行
+            // - 编辑态('-')：KEY1 减，KEY3 加；KEY2 回选择态
+            // - KEY4：返回 KEMU3 子菜单
+
+            if (KEY4_PRES == key)
+            {
+                s_ui_page = UI_PAGE_KKF_KEMU3_DBG;
+                s_kkf_slope_state = KKF_SLOPE_STATE_SEL;
+                ips200_clear();
+            }
+            else if (s_kkf_slope_state == KKF_SLOPE_STATE_SEL)
+            {
+                if (KEY3_PRES == key)
+                {
+                    if (s_kkf_slope_item > 1u) s_kkf_slope_item--;
+                    else s_kkf_slope_item = (uint8)KKF_SLOPE_FIELD_COUNT;
+                    ips200_clear();
+                }
+                else if (KEY1_PRES == key)
+                {
+                    if (s_kkf_slope_item < (uint8)KKF_SLOPE_FIELD_COUNT) s_kkf_slope_item++;
+                    else s_kkf_slope_item = 1u;
+                    ips200_clear();
+                }
+                else if (KEY2_PRES == key)
+                {
+                    s_kkf_slope_state = KKF_SLOPE_STATE_EDIT;
+                    ips200_clear();
+                }
+            }
+            else
+            {
+                if (k1_long_evt && k1_now)
+                {
+                    uint8 i;
+                    for (i = 0u; i < KKF_PID_LONG_PRESS_EXTRA_STEPS; i++)
+                    {
+                        kkf_slope_adjust_value((kkf_slope_field_t)s_kkf_slope_item, -1);
+                    }
+                    ips200_clear();
+                }
+                else if (k3_long_evt && k3_now)
+                {
+                    uint8 i;
+                    for (i = 0u; i < KKF_PID_LONG_PRESS_EXTRA_STEPS; i++)
+                    {
+                        kkf_slope_adjust_value((kkf_slope_field_t)s_kkf_slope_item, +1);
+                    }
+                    ips200_clear();
+                }
+                else if (KEY1_PRES == key)
+                {
+                    kkf_slope_adjust_value((kkf_slope_field_t)s_kkf_slope_item, -1);
+                    ips200_clear();
+                }
+                else if (KEY3_PRES == key)
+                {
+                    kkf_slope_adjust_value((kkf_slope_field_t)s_kkf_slope_item, +1);
+                    ips200_clear();
+                }
+                else if (KEY2_PRES == key)
+                {
+                    s_kkf_slope_state = KKF_SLOPE_STATE_SEL;
                     ips200_clear();
                 }
             }

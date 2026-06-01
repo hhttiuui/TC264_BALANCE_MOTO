@@ -23,8 +23,8 @@ int core0_main(void)
     gpio_init(P21_3, GPO, GPIO_HIGH, GPO_PUSH_PULL);//娴嬭瘯
 
     gpio_init(P22_0, GPO, GPIO_HIGH, GPO_PUSH_PULL);//娴嬭瘯
-    gpio_init(P22_1, GPO, GPIO_HIGH, GPO_PUSH_PULL);//娴嬭瘯
-    gpio_init(P22_2, GPO, GPIO_HIGH, GPO_PUSH_PULL);//娴嬭瘯
+    gpio_init(P22_1, GPO, GPIO_HIGH, GPO_PUSH_PULL);//暂定pid调控指示引脚
+    gpio_init(P22_2, GPO, GPIO_HIGH, GPO_PUSH_PULL);//暂定主周期指示引脚
     gpio_init(P22_3, GPO, GPIO_HIGH, GPO_PUSH_PULL);//娴嬭瘯
 
     cpu_wait_event_ready();

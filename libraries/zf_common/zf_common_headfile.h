@@ -134,6 +134,7 @@
 #include "Menu.h"
 #include "motor_controller.h"
 #include "quaternion_ahrs.h"
+#include "roll_slope_speed.h"
 #include "small_driver_uart_control.h"
 #include "top_8_turn_2.h"
 #include "top_stop.h"

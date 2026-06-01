@@ -27,6 +27,9 @@ void motor_control_task_5ms(void);
 // 以编码器 5ms 增量为单位设置目标速度（与 encoder_get_demo5_delta_5ms 返回单位一致）
 void motor_set_target_counts_per_5ms(int16 target_counts);
 
+// 目标速度偏置（counts/5ms）：正值加速，负值减速；传 0 解除偏置
+void pitch_speed_change(int16 delta_counts);
+
 // 设置/获取占空比斜率限制（单位：百分比/秒），由外部模块调用以调整保护强度
 void motor_set_duty_slope_limit_percent_per_s(float percent_per_s);
 float motor_get_duty_slope_limit_percent_per_s(void);

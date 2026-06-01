@@ -15,6 +15,7 @@
 extern "C" {
 #endif
 #include "zf_common_headfile.h"
+#include "top_8_turn_2.h"
 #define TTOP_KEMU3_SEG_COUNT           (8u)
 
 typedef enum
@@ -43,9 +44,15 @@ typedef struct
 } ttop_kemu3_status_t;
 
 extern volatile int g_ttop_kemu3_counts_per_meter;
+// EX2 单次弯道参数在 g_eight2_prog_ex2 中定义，以下参数用于设置重复次数。
+extern volatile unsigned char g_ttop_kemu3_ex2_loop_count;
+// KEMU3 最后一段回正参数（写入最后一个扩展段表）
+extern volatile ttop_eight2_seg_t g_ttop_kemu3_end_seg;
 extern volatile ttop_kemu3_seg_t g_ttop_kemu3_seg_table[TTOP_KEMU3_SEG_COUNT];
 
 void ttop_kemu3_init(void);
+void ttop_kemu3_start(void);
+void ttop_kemu3_reset(void);
 unsigned char ttop_kemu3_task_5ms(void);
 void ttop_kemu3_rebuild_targets(void);
 const ttop_kemu3_status_t *ttop_kemu3_get_status(void);

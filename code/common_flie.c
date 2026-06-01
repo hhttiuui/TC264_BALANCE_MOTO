@@ -698,7 +698,7 @@ void pid_timer_handler_dynamic_cascade(pid_mode_t mode)
 
 void pid_timer_handler_multirate_2ms(void)
 {
-	gpio_toggle_level(P22_0);
+	gpio_toggle_level(P22_1);
 	// 新框架：外部固定 2ms 调用本函数
 	// - 角速度环：每次调用执行（2ms）
 	// - 角度环：每 2 次执行（4ms）
@@ -784,5 +784,5 @@ void pid_timer_handler_multirate_2ms(void)
 	{
 		s_sched_cnt = 0u;
 	}
-	gpio_toggle_level(P22_0);
+	gpio_toggle_level(P22_1);
 }

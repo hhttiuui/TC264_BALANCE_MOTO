@@ -126,11 +126,11 @@ IFX_INTERRUPT(cc61_pit_ch0_isr, 0, CCU6_1_CH0_ISR_PRIORITY)
             s_gps_nav_div20 = 0u;
             gps_nav_task_100ms();
         }
-        
+
         if(++s_gps_storage_div100 >= 100u)
         {
             s_gps_storage_div100 = 0u;
-            gps_storage_task_100ms();
+            //gps_storage_task_100ms();
         }
 
     }

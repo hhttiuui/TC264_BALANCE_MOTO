@@ -40,7 +40,7 @@ void ttop_funtion_mode_once_apply(void)
 	}
 	else if (funtion_kemu == 2u)// MODE2：变速
 	{		
-		PID_INIT_BY_MODE(PID_MODE_CASCADE_EX2);
+		PID_INIT_BY_MODE(PID_MODE_CASCADE_EX3);
 		ttop_speed_change_init(PID_MODE_CASCADE_EX2, PID_MODE_CASCADE_EX1);
 	}
 	else if (funtion_kemu == 3u)// MODE3：直线速度55
@@ -67,7 +67,7 @@ void ttop_funtion_mode_once_apply(void)
 	{
 		ttop_kemu3_init();
 		ttop_speed_change_init(PID_MODE_CASCADE_EX2, PID_MODE_CASCADE_EX1);
-		PID_INIT_BY_MODE(PID_MODE_CASCADE);
+		//PID_INIT_BY_MODE(PID_MODE_CASCADE);
 	}
 	else if (funtion_kemu == 8u)// MODE8：
 	{
@@ -114,6 +114,7 @@ void ttop_encoder_task_5ms(void)
 	gpio_toggle_level(P21_2);
 	encoder_flag = 0;
 	encoder_tim5_demo_update_5ms();// 编码器速度 5ms 更新函数
+	roll_slope_speed_task_5ms(); // 根据当前速度自动调整坡度补偿
 	motor_control_task_5ms();     // 电机速度环控制任务 5ms 调用函数
 	
 	gpio_toggle_level(P21_2);
@@ -215,6 +216,7 @@ void ttop_pid_task_5ms(void)
 
 void ttop_funtion_new(void)
 {
+	gpio_toggle_level(P22_2);
 	// CH4 的急停/启动判断需要在任何状态下都可用，必须放在 ready 早退之前。
 	ttop_rc_control_emergency_stop_now();
 	if (!funtion_ready_flag) return;
@@ -291,6 +293,7 @@ void ttop_funtion_new(void)
 	else if(funtion_kemu == 12){}
 
 	else{		}
+	gpio_toggle_level(P22_2);
 }
 
 static void load_saved_route_points(void)
@@ -351,6 +354,7 @@ void ttop_funtion_init(void)
 	ttop_rc_control_init();         // 遥控器控制模块初始化
     // 惯性导航：航迹推算模块初始化
     ins_dr_init();
+	roll_slope_speed_init(); // 坡度补偿模块初始化
 
     // 赛事功能：里程到点停机 初始化
     ttop_stop_init();

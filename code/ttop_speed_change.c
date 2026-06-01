@@ -12,7 +12,7 @@
 
 // 速度低通滤波系数（0~1，越大越平滑）
 #ifndef TTOP_SPEED_CHANGE_LPF_ALPHA
-#define TTOP_SPEED_CHANGE_LPF_ALPHA     (0.98f)
+#define TTOP_SPEED_CHANGE_LPF_ALPHA     (0.95f)
 #endif
 
 // 动态插值目标更新分频（2 表示每 10ms 更新一次目标）

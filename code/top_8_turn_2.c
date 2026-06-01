@@ -77,6 +77,21 @@ volatile ttop_eight2_seg_t g_eight2_prog_ex1[TTOP_EIGHT2_PROG_LEN] = { {0.0f, 0.
 // 扩展段表 2：预留给其他功能（默认全 0，等效于“目标=0、限速=默认”）
 volatile ttop_eight2_seg_t g_eight2_prog_ex2[TTOP_EIGHT2_PROG_LEN] = { {0.0f, 0.0f} };
 
+// 扩展段表 3：预留给其他功能（默认全 0，等效于“目标=0、限速=默认”）
+volatile ttop_eight2_seg_t g_eight2_prog_ex3[TTOP_EIGHT2_PROG_LEN] = { {0.0f, 0.0f} };
+
+// 扩展段表 4：预留给其他功能（默认全 0，等效于“目标=0、限速=默认”）
+volatile ttop_eight2_seg_t g_eight2_prog_ex4[TTOP_EIGHT2_PROG_LEN] = { {0.0f, 0.0f} };
+
+// 扩展段表 5：预留给其他功能（默认全 0，等效于“目标=0、限速=默认”）
+volatile ttop_eight2_seg_t g_eight2_prog_ex5[TTOP_EIGHT2_PROG_LEN] = { {0.0f, 0.0f} };
+
+// 扩展段表 6：预留给其他功能（默认全 0，等效于“目标=0、限速=默认”）
+volatile ttop_eight2_seg_t g_eight2_prog_ex6[TTOP_EIGHT2_PROG_LEN] = { {0.0f, 0.0f} };
+
+// 扩展段表 7：预留给其他功能（默认全 0，等效于“目标=0、限速=默认”）
+volatile ttop_eight2_seg_t g_eight2_prog_ex7[TTOP_EIGHT2_PROG_LEN] = { {0.0f, 0.0f} };
+
 // 当前活动段表（默认 main）
 static volatile ttop_eight2_seg_t *s_eight2_prog_active = g_eight2_prog;
 static volatile ttop_eight2_prog_id_t s_eight2_prog_id = TTOP_EIGHT2_PROG_MAIN;
@@ -91,6 +106,31 @@ void ttop_eight2_select_program(ttop_eight2_prog_id_t id)
 	else if (id == TTOP_EIGHT2_PROG_EX2)
 	{
 		s_eight2_prog_active = g_eight2_prog_ex2;
+		s_eight2_prog_id = id;
+	}
+	else if (id == TTOP_EIGHT2_PROG_EX3)
+	{
+		s_eight2_prog_active = g_eight2_prog_ex3;
+		s_eight2_prog_id = id;
+	}
+	else if (id == TTOP_EIGHT2_PROG_EX4)
+	{
+		s_eight2_prog_active = g_eight2_prog_ex4;
+		s_eight2_prog_id = id;
+	}
+	else if (id == TTOP_EIGHT2_PROG_EX5)
+	{
+		s_eight2_prog_active = g_eight2_prog_ex5;
+		s_eight2_prog_id = id;
+	}
+	else if (id == TTOP_EIGHT2_PROG_EX6)
+	{
+		s_eight2_prog_active = g_eight2_prog_ex6;
+		s_eight2_prog_id = id;
+	}
+	else if (id == TTOP_EIGHT2_PROG_EX7)
+	{
+		s_eight2_prog_active = g_eight2_prog_ex7;
 		s_eight2_prog_id = id;
 	}
 	else
@@ -146,7 +186,12 @@ static inline uint8 ttop_eight2_is_hold_prev_seg(const volatile ttop_eight2_seg_
 
 static inline float ttop_eight2_get_base0_by_program(void)
 {
-	if (s_eight2_prog_id == TTOP_EIGHT2_PROG_EX2)
+	if (s_eight2_prog_id == TTOP_EIGHT2_PROG_EX2 ||
+		s_eight2_prog_id == TTOP_EIGHT2_PROG_EX3 ||
+		s_eight2_prog_id == TTOP_EIGHT2_PROG_EX4 ||
+		s_eight2_prog_id == TTOP_EIGHT2_PROG_EX5 ||
+		s_eight2_prog_id == TTOP_EIGHT2_PROG_EX6 ||
+		s_eight2_prog_id == TTOP_EIGHT2_PROG_EX7)
 	{
 		return (float)TTOP_EIGHT2_EX2_BASE0_DEG;
 	}

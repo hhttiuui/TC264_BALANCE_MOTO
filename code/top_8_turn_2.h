@@ -41,6 +41,11 @@ typedef enum
 	TTOP_EIGHT2_PROG_MAIN = 0u, // 默认主段表（g_eight2_prog）
 	TTOP_EIGHT2_PROG_EX1  = 1u, // 扩展段表1
 	TTOP_EIGHT2_PROG_EX2  = 2u, // 扩展段表2
+	TTOP_EIGHT2_PROG_EX3  = 3u, // 扩展段表3
+	TTOP_EIGHT2_PROG_EX4  = 4u, // 扩展段表4
+	TTOP_EIGHT2_PROG_EX5  = 5u, // 扩展段表5
+	TTOP_EIGHT2_PROG_EX6  = 6u, // 扩展段表6
+	TTOP_EIGHT2_PROG_EX7  = 7u, // 扩展段表7
 } ttop_eight2_prog_id_t;
 
 // 选择当前使用的段表：内部会 reset 状态机，避免跨段表串状态
@@ -53,6 +58,11 @@ ttop_eight2_prog_id_t ttop_eight2_get_program(void);
 extern volatile ttop_eight2_seg_t g_eight2_prog[TTOP_EIGHT2_PROG_LEN];
 extern volatile ttop_eight2_seg_t g_eight2_prog_ex1[TTOP_EIGHT2_PROG_LEN];
 extern volatile ttop_eight2_seg_t g_eight2_prog_ex2[TTOP_EIGHT2_PROG_LEN];
+extern volatile ttop_eight2_seg_t g_eight2_prog_ex3[TTOP_EIGHT2_PROG_LEN];
+extern volatile ttop_eight2_seg_t g_eight2_prog_ex4[TTOP_EIGHT2_PROG_LEN];
+extern volatile ttop_eight2_seg_t g_eight2_prog_ex5[TTOP_EIGHT2_PROG_LEN];
+extern volatile ttop_eight2_seg_t g_eight2_prog_ex6[TTOP_EIGHT2_PROG_LEN];
+extern volatile ttop_eight2_seg_t g_eight2_prog_ex7[TTOP_EIGHT2_PROG_LEN];
 
 void ttop_eight2_init(void);
 void ttop_eight2_reset_now(void);

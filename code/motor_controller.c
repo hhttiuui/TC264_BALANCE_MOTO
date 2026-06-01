@@ -47,6 +47,8 @@ static int16 s_prev_duty = 0;
 
 // 目标速度（单位：counts per 5ms）
 static volatile int16 g_motor_target_counts = 0;
+// 目标速度偏置（单位：counts per 5ms）
+static volatile int16 g_motor_target_offset_counts = 0;
 
 // 启动控制逻辑已简化，软起动/推动启动相关类型已移除
 
@@ -190,6 +192,11 @@ void motor_set_target_counts_per_5ms(int16 target_counts)
     g_motor_target_counts = target_counts;
 }
 
+void pitch_speed_change(int16 delta_counts)
+{
+    g_motor_target_offset_counts = delta_counts;
+}
+
 // 清除速度相关状态：原始 delta / 滤波值 / PID 积分与历史测量
 // 同时调用编码器层的速度清零，确保测量端与控制端一致
 void motor_clear_speed(void)
@@ -253,7 +260,8 @@ void motor_control_task_5ms(void)
     // 在获取并滤波当前速度后（软起动/推动启动逻辑已移除）
     
     // 目标与测量（单位相同）
-    float setpoint = (float)g_motor_target_counts;
+    float setpoint = (float)g_motor_target_counts + (float)g_motor_target_offset_counts;
+    if (setpoint < 0.0f) setpoint = 0.0f;
     float measurement = motor_speed_filtered_counts;
 
     // ============================ PID + 前馈 ============================
