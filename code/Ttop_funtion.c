@@ -338,6 +338,8 @@ void ttop_funtion_init(void)
 	(void)flash_storage_load_kemu1_cfg();
 	(void)flash_storage_load_ins_path();
 	(void)flash_storage_load_kemu1_cfg();
+	(void)flash_storage_load_slope_cfg();
+	(void)flash_storage_load_kemu3_seg();
 
 	// 舵机 PID 初始化：按当前模式（funtion_kemu）初始化一次
 	// funtion_kemu 与菜单模式对齐：1..12；PID_INIT_BY_MODE 使用 pid_mode_t

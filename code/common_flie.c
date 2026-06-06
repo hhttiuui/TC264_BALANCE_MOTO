@@ -16,6 +16,9 @@
 int count_pid = 0;
 volatile uint8 pid_flag = 0;
 
+// yaw 零点偏置（度），后续可通过菜单修改并存入 Flash
+volatile float g_yaw_zero_offset_deg = 0.0f;
+
 // PID/AHRS 调用周期（秒）：当前用5ms触发 
 #define PID_TASK_DT_S   (0.005f)
 
@@ -711,7 +714,7 @@ void pid_timer_handler_multirate_2ms(void)
 
 	float pitch_deg = (float)g_pitch_deg_cache;
 	float pitch_rate_dps_f = (float)g_pitch_rate_dps_f_cache;
-	float yaw_rel_deg = (float)g_yaw_rel_deg_cache;
+	float yaw_rel_deg = (float)g_yaw_rel_deg_cache - g_yaw_zero_offset_deg;
 	uint8 run_angle = 0u;
 	uint8 run_yaw = 0u;
 

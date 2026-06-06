@@ -74,6 +74,18 @@ uint8 flash_storage_load_ins_path(void);
 // 成功返回 1；失败返回 0
 uint8 flash_storage_save_ins_path(void);
 
+// ============================================================================
+// Flash 参数存储 —— 坡道速度参数（roll_slope_speed_cfg）
+// ============================================================================
+uint8 flash_storage_load_slope_cfg(void);
+uint8 flash_storage_save_slope_cfg(void);
+
+// ============================================================================
+// Flash 参数存储 —— KEMU3 段表（g_ttop_kemu3_seg_table）
+// ============================================================================
+uint8 flash_storage_load_kemu3_seg(void);
+uint8 flash_storage_save_kemu3_seg(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -149,6 +149,7 @@ void servo_zero(void);
 
 extern volatile float g_yaw_pid_out_deg;
 extern volatile float g_yaw_target_deg;
+extern volatile float g_yaw_zero_offset_deg;  // yaw 零点偏置（度），菜单可调
 extern int count_pid;
 
 #endif /* CODE_COMMON_FLIE_H_ */

@@ -651,11 +651,17 @@ static void kkf_kemu3_dbg_draw(void)
     ips200_show_float(16 * 9, 3 * 15, g_ttop_kemu3_end_seg.rate_dps, 6, 1);
     ips200_show_string(16, 4 * 15, "EX2_LOOP:");
     ips200_show_int(16 * 9, 4 * 15, (int32)g_ttop_kemu3_ex2_loop_count, 3);
-    ips200_show_string(16, 5 * 15, "SLOPE_DBG");
+    ips200_show_string(16, 5 * 15, "YAW_OFS:");
+    ips200_show_float(16 * 9, 5 * 15, g_yaw_zero_offset_deg, 6, 2);
+    ips200_show_string(16, 6 * 15, "YAW_KI:");
+    ips200_show_float(16 * 9, 6 * 15, g_kemu3_yaw_ki_path, 6, 3);
+    ips200_show_string(16, 7 * 15, "SLOPE_DBG");
 
     if (s_kkf_kemu3_dbg_edit == 1u) cursor[0] = '-';
     else if (s_kkf_kemu3_dbg_edit == 2u) cursor[0] = '*';
     else if (s_kkf_kemu3_dbg_edit == 3u) cursor[0] = '-';
+    else if (s_kkf_kemu3_dbg_edit == 4u) cursor[0] = '-';
+    else if (s_kkf_kemu3_dbg_edit == 5u) cursor[0] = '-';
     ips200_show_string(0, (uint16)((1u + (uint16)s_kkf_kemu3_menu_item) * 15u), cursor);
 
     kkf_draw_signature_bottom();
@@ -1559,8 +1565,10 @@ void Menu_Select(void)
             ok3 = flash_storage_save_eight2_prog_ex1();
             ok4 = flash_storage_save_eight2_prog_ex2();
             ok5 = flash_storage_save_kemu1_cfg();
-            flash_storage_save_ins_path(); 
+            flash_storage_save_ins_path();
             flash_storage_save_kemu1_cfg();
+            flash_storage_save_slope_cfg();
+            flash_storage_save_kemu3_seg();
             
             // 轻量提示：显示 SAVE OK/FAIL
             if (ok1 && ok2 && ok3 && ok4 && ok5)
@@ -1627,9 +1635,11 @@ void Menu_Select(void)
                 (s_kkf_kemu1_state == KKF_KEMU1_EDIT_METERS ||
                  s_kkf_kemu1_state == KKF_KEMU1_EDIT_SPEED));
     uint8 kemu3_edit_page =
-        (uint8)(s_ui_page == UI_PAGE_KKF_KEMU3_PATH &&
+        (uint8)((s_ui_page == UI_PAGE_KKF_KEMU3_PATH &&
                 (s_kkf_kemu3_state == KKF_KEMU3_EDIT_METERS ||
-                 s_kkf_kemu3_state == KKF_KEMU3_EDIT_SPEED));
+                 s_kkf_kemu3_state == KKF_KEMU3_EDIT_SPEED)) ||
+                (s_ui_page == UI_PAGE_KKF_KEMU3_DBG &&
+                 (s_kkf_kemu3_dbg_edit == 4u || s_kkf_kemu3_dbg_edit == 5u)));
     uint8 slope_edit_page =
         (uint8)(s_ui_page == UI_PAGE_KKF_SLOPE_DBG &&
                 (s_kkf_slope_state == KKF_SLOPE_STATE_EDIT));
@@ -2510,7 +2520,7 @@ void Menu_Select(void)
                         ips200_clear();
                     }
                 }
-                else
+                else if (s_kkf_kemu3_dbg_edit == 3u)
                 {
                     if (KEY1_PRES == key)
                     {
@@ -2528,16 +2538,92 @@ void Menu_Select(void)
                         ips200_clear();
                     }
                 }
+                else if (s_kkf_kemu3_dbg_edit == 4u)
+                {
+                    // edit==4: YAW_OFS 步进 0.01，支持长按
+                    if (k1_long_evt && k1_now)
+                    {
+                        uint8 i;
+                        for (i = 0u; i < KKF_PID_LONG_PRESS_EXTRA_STEPS; i++)
+                        {
+                            g_yaw_zero_offset_deg -= 0.01f;
+                        }
+                        ips200_clear();
+                    }
+                    else if (k3_long_evt && k3_now)
+                    {
+                        uint8 i;
+                        for (i = 0u; i < KKF_PID_LONG_PRESS_EXTRA_STEPS; i++)
+                        {
+                            g_yaw_zero_offset_deg += 0.01f;
+                        }
+                        ips200_clear();
+                    }
+                    else if (KEY1_PRES == key)
+                    {
+                        g_yaw_zero_offset_deg -= 0.01f;
+                        ips200_clear();
+                    }
+                    else if (KEY3_PRES == key)
+                    {
+                        g_yaw_zero_offset_deg += 0.01f;
+                        ips200_clear();
+                    }
+                    else if (KEY2_PRES == key)
+                    {
+                        s_kkf_kemu3_dbg_edit = 0u;
+                        ips200_clear();
+                    }
+                }
+                else
+                {
+                    // edit==5: YAW_KI 步进 0.001，支持长按
+                    if (k1_long_evt && k1_now)
+                    {
+                        uint8 i;
+                        for (i = 0u; i < KKF_PID_LONG_PRESS_EXTRA_STEPS; i++)
+                        {
+                            g_kemu3_yaw_ki_path -= 0.001f;
+                        }
+                        if (g_kemu3_yaw_ki_path < 0.0f) g_kemu3_yaw_ki_path = 0.0f;
+                        ips200_clear();
+                    }
+                    else if (k3_long_evt && k3_now)
+                    {
+                        uint8 i;
+                        for (i = 0u; i < KKF_PID_LONG_PRESS_EXTRA_STEPS; i++)
+                        {
+                            g_kemu3_yaw_ki_path += 0.001f;
+                        }
+                        ips200_clear();
+                    }
+                    else if (KEY1_PRES == key)
+                    {
+                        g_kemu3_yaw_ki_path -= 0.001f;
+                        if (g_kemu3_yaw_ki_path < 0.0f) g_kemu3_yaw_ki_path = 0.0f;
+                        ips200_clear();
+                    }
+                    else if (KEY3_PRES == key)
+                    {
+                        g_kemu3_yaw_ki_path += 0.001f;
+                        ips200_clear();
+                    }
+                    else if (KEY2_PRES == key)
+                    {
+                        s_kkf_kemu3_dbg_edit = 0u;
+                        ips200_clear();
+                    }
+                }
             }
             else if (KEY3_PRES == key)
             {
                 if (s_kkf_kemu3_menu_item > 1u) s_kkf_kemu3_menu_item--;
-                else s_kkf_kemu3_menu_item = 4u;
+                else s_kkf_kemu3_menu_item = 6u;
                 ips200_clear();
             }
             else if (KEY1_PRES == key)
             {
-                if (s_kkf_kemu3_menu_item < 4u) s_kkf_kemu3_menu_item++;
+                if (s_kkf_kemu3_menu_item < 6u) s_kkf_kemu3_menu_item++;
                 else s_kkf_kemu3_menu_item = 1u;
                 ips200_clear();
             }
@@ -2556,6 +2642,14 @@ void Menu_Select(void)
                 else if (s_kkf_kemu3_menu_item == 3u)
                 {
                     s_kkf_kemu3_dbg_edit = 3u;
+                }
+                else if (s_kkf_kemu3_menu_item == 4u)
+                {
+                    s_kkf_kemu3_dbg_edit = 4u;
+                }
+                else if (s_kkf_kemu3_menu_item == 5u)
+                {
+                    s_kkf_kemu3_dbg_edit = 5u;
                 }
                 else
                 {

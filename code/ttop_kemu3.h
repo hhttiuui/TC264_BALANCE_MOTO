@@ -50,6 +50,9 @@ extern volatile unsigned char g_ttop_kemu3_ex2_loop_count;
 extern volatile ttop_eight2_seg_t g_ttop_kemu3_end_seg;
 extern volatile ttop_kemu3_seg_t g_ttop_kemu3_seg_table[TTOP_KEMU3_SEG_COUNT];
 
+// 直线段 yaw 积分纠偏增益（菜单可调）
+extern volatile float g_kemu3_yaw_ki_path;
+
 void ttop_kemu3_init(void);
 void ttop_kemu3_start(void);
 void ttop_kemu3_reset(void);

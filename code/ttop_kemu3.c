@@ -13,7 +13,11 @@
 #include "encoder_count.h"
 #include "motor_controller.h"
 #include "top_8_turn_2.h"
+#include "common_flie.h"
 #include "zf_common_headfile.h"
+
+// 外部 IMU 显示变量（yaw 相对角度，由 imu_task_handler_2ms 更新）
+extern float show_yaw_deg;
 
 // 1m 对应编码器计数（可被菜单修改）
 volatile int g_ttop_kemu3_counts_per_meter = 18500;
@@ -30,7 +34,7 @@ volatile ttop_eight2_seg_t g_ttop_kemu3_end_seg = { -3.0f, 35.0f };
 // - seg[2], seg[5] 必须是转弯段（默认分别使用 EX1 / EX2）
 volatile ttop_kemu3_seg_t g_ttop_kemu3_seg_table[TTOP_KEMU3_SEG_COUNT] =
 {
-	{ TTOP_KEMU3_SEG_STRAIGHT, 20.0f, 280, TTOP_EIGHT2_PROG_MAIN },
+	{ TTOP_KEMU3_SEG_STRAIGHT, 20.0f, 260, TTOP_EIGHT2_PROG_MAIN },
 	{ TTOP_KEMU3_SEG_STRAIGHT,  1.5f, 200, TTOP_EIGHT2_PROG_MAIN },
 	{ TTOP_KEMU3_SEG_TURN,      0.0f, 200, TTOP_EIGHT2_PROG_EX1  },
 	{ TTOP_KEMU3_SEG_STRAIGHT, 8.0f, 280, TTOP_EIGHT2_PROG_MAIN },
@@ -43,6 +47,17 @@ volatile ttop_kemu3_seg_t g_ttop_kemu3_seg_table[TTOP_KEMU3_SEG_COUNT] =
 static ttop_kemu3_status_t s_kemu3;
 
 #define TTOP_KEMU3_S_TURN_MAX   (5u)
+
+// ---- 直线段 yaw 积分纠偏 ----
+// 每 5ms 对 yaw 误差积分，修正 g_yaw_target_deg 使车回到直线
+#define KEMU3_YAW_INTEGRAL_DT   (0.005f)
+#define KEMU3_YAW_INTEGRAL_MAX  (5.0f)   // 积分限幅（度）
+
+// 路径纠偏增益（可通过菜单修改）
+volatile float g_kemu3_yaw_ki_path = 0.865f;
+
+static float s_kemu3_yaw_integral = 0.0f;
+static uint8 s_kemu3_yaw_integral_done = 0u;  // 前10m积分完成后置1，不再碰g_yaw_target_deg
 
 static inline long long ttop_abs_i64_local(long long x)
 {
@@ -92,6 +107,8 @@ static void ttop_kemu3_reset_runtime_local(void)
 	s_kemu3.turn_inited = 0u;
 	s_kemu3.straight_counts_accum = 0;
 	s_kemu3.last_encoder_total = encoder_get_demo5_count_total();
+	s_kemu3_yaw_integral = 0.0f;
+	s_kemu3_yaw_integral_done = 0u;
 }
 
 static void ttop_kemu3_clear_prog_local(volatile ttop_eight2_seg_t *prog)
@@ -215,6 +232,7 @@ unsigned char ttop_kemu3_task_5ms(void)
 {
 	if (s_kemu3.done)
 	{
+		motor_set_target_counts_per_5ms(0);
 		return 1u;
 	}
 
@@ -242,19 +260,9 @@ unsigned char ttop_kemu3_task_5ms(void)
 		{
 			if (!s_kemu3.turn_inited)
 			{
-				if (seg->turn_prog_id == (unsigned char)TTOP_EIGHT2_PROG_EX2)
-				{
-					ttop_kemu3_rebuild_ex3_table_local();
-					ttop_eight2_select_program(TTOP_EIGHT2_PROG_EX3);
-					ttop_eight2_reset_now();
-					s_kemu3.turn_inited = 1u;
-				}
-				else
-				{
-					ttop_eight2_select_program((ttop_eight2_prog_id_t)seg->turn_prog_id);
-					ttop_eight2_reset_now();
-					s_kemu3.turn_inited = 1u;
-				}
+				ttop_eight2_select_program((ttop_eight2_prog_id_t)seg->turn_prog_id);
+				ttop_eight2_reset_now();
+				s_kemu3.turn_inited = 1u;
 			}
 
 			if (ttop_eight2_task_5ms())
@@ -278,6 +286,28 @@ unsigned char ttop_kemu3_task_5ms(void)
 		long long delta = now_total - s_kemu3.last_encoder_total;
 		s_kemu3.last_encoder_total = now_total;
 		s_kemu3.straight_counts_accum += ttop_abs_i64_local(delta);
+	}
+
+	// 直线段 yaw 积分纠偏：仅前 10m 生效，完成后不再修改 g_yaw_target_deg
+	if (!s_kemu3_yaw_integral_done)
+	{
+		long long limit_counts = (long long)((float)g_ttop_kemu3_counts_per_meter * 10.0f);
+		if (s_kemu3.straight_counts_accum < limit_counts)
+		{
+			float yaw_err = show_yaw_deg;
+			s_kemu3_yaw_integral += yaw_err * KEMU3_YAW_INTEGRAL_DT;
+			if (s_kemu3_yaw_integral > KEMU3_YAW_INTEGRAL_MAX)
+				s_kemu3_yaw_integral = KEMU3_YAW_INTEGRAL_MAX;
+			if (s_kemu3_yaw_integral < -KEMU3_YAW_INTEGRAL_MAX)
+				s_kemu3_yaw_integral = -KEMU3_YAW_INTEGRAL_MAX;
+			g_yaw_target_deg = -g_kemu3_yaw_ki_path * s_kemu3_yaw_integral;
+		}
+		else
+		{
+			// 10m 到达，停止积分，置 0 一次后不再碰
+			g_yaw_target_deg = 0.0f;
+			s_kemu3_yaw_integral_done = 1u;
+		}
 	}
 
 	{

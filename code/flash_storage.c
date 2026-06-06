@@ -22,7 +22,9 @@
 
 #include "common_flie.h"      // s_pid_mode_cfg
 #include "top_8_turn_2.h"     // g_eight2_prog
-#include "ttop_kemu1.h"       // g_ttop_kemu1_* 
+#include "ttop_kemu1.h"       // g_ttop_kemu1_*
+#include "ttop_kemu3.h"       // g_ttop_kemu3_seg_table
+#include "roll_slope_speed.h" // roll_slope_speed_cfg_t
 #include "ins_path_follow.h"  // g_ins_path, g_ins_path_count, ins_waypoint_t
 #include "zf_driver_flash.h"
 
@@ -74,6 +76,22 @@
 #define FLASH_STORAGE_PAGE_INS      (1u)
 #endif
 
+// 坡道速度参数存储位置
+#ifndef FLASH_STORAGE_SECTOR_SLOPE
+#define FLASH_STORAGE_SECTOR_SLOPE  (0u)
+#endif
+#ifndef FLASH_STORAGE_PAGE_SLOPE
+#define FLASH_STORAGE_PAGE_SLOPE    (5u)
+#endif
+
+// KEMU3 段表存储位置
+#ifndef FLASH_STORAGE_SECTOR_KEMU3
+#define FLASH_STORAGE_SECTOR_KEMU3  (0u)
+#endif
+#ifndef FLASH_STORAGE_PAGE_KEMU3
+#define FLASH_STORAGE_PAGE_KEMU3    (6u)
+#endif
+
 typedef struct
 {
 	uint32 magic;
@@ -88,6 +106,8 @@ typedef struct
 #define FLASH_STORAGE_MAGIC_EIGHT2_EX2 (0x45383232u) // 'E822'
 #define FLASH_STORAGE_MAGIC_KEMU1   (0x4B4D5531u) // 'KMU1'
 #define FLASH_STORAGE_MAGIC_INS     (0x494E5350u) // 'INSP' (INS Path)
+#define FLASH_STORAGE_MAGIC_SLOPE   (0x534C5043u) // 'SLPC'
+#define FLASH_STORAGE_MAGIC_KEMU3   (0x4B4D5533u) // 'KMU3'
 #define FLASH_STORAGE_VERSION       (1u)
 
 // Header 按 uint32 槽位存储：magic/version+len（打包）/crc
@@ -472,5 +492,67 @@ uint8 flash_storage_load_ins_path(void)
 		g_ins_path_count = count;
 	}
 
+	return 1u;
+}
+
+
+// ============================================================================
+// Flash 存储 —— roll_slope_speed_cfg（坡道速度参数）
+// ============================================================================
+
+uint8 flash_storage_save_slope_cfg(void)
+{
+	const roll_slope_speed_cfg_t *cfg = roll_slope_speed_get_cfg();
+	return flash_storage_write_blob(
+		FLASH_STORAGE_SECTOR_SLOPE,
+		FLASH_STORAGE_PAGE_SLOPE,
+		FLASH_STORAGE_MAGIC_SLOPE,
+		(const void *)cfg,
+		(uint16)sizeof(roll_slope_speed_cfg_t));
+}
+
+uint8 flash_storage_load_slope_cfg(void)
+{
+	roll_slope_speed_cfg_t tmp;
+	if (!flash_storage_read_blob(
+			FLASH_STORAGE_SECTOR_SLOPE,
+			FLASH_STORAGE_PAGE_SLOPE,
+			FLASH_STORAGE_MAGIC_SLOPE,
+			(void *)&tmp,
+			(uint16)sizeof(roll_slope_speed_cfg_t)))
+	{
+		return 0u;
+	}
+	roll_slope_speed_set_cfg(&tmp);
+	return 1u;
+}
+
+// ============================================================================
+// Flash 存储 —— g_ttop_kemu3_seg_table（KEMU3 段表）
+// ============================================================================
+
+uint8 flash_storage_save_kemu3_seg(void)
+{
+	return flash_storage_write_blob(
+		FLASH_STORAGE_SECTOR_KEMU3,
+		FLASH_STORAGE_PAGE_KEMU3,
+		FLASH_STORAGE_MAGIC_KEMU3,
+		(const void *)g_ttop_kemu3_seg_table,
+		(uint16)sizeof(ttop_kemu3_seg_t) * TTOP_KEMU3_SEG_COUNT);
+}
+
+uint8 flash_storage_load_kemu3_seg(void)
+{
+	ttop_kemu3_seg_t tmp[TTOP_KEMU3_SEG_COUNT];
+	if (!flash_storage_read_blob(
+			FLASH_STORAGE_SECTOR_KEMU3,
+			FLASH_STORAGE_PAGE_KEMU3,
+			FLASH_STORAGE_MAGIC_KEMU3,
+			(void *)tmp,
+			(uint16)sizeof(ttop_kemu3_seg_t) * TTOP_KEMU3_SEG_COUNT))
+	{
+		return 0u;
+	}
+	memcpy((void *)g_ttop_kemu3_seg_table, (const void *)tmp, sizeof(tmp));
 	return 1u;
 }
