@@ -21,6 +21,7 @@
 
 // 便捷封装需要用到 IMU660RX 的数据与转换宏
 #include "zf_device_imu660rx.h"
+#include "imu_filter.h"
 
 #ifndef M_PI
 #define M_PI (3.14159265358979323846)
@@ -386,12 +387,12 @@ void ahrs_mahony_update_imu660rx_euler_deg(ahrs_mahony_t *s,
     // gyro: deg/s -> rad/s
     const float deg2rad = 0.017453292519943295f;
     float gx = imu660rx_gyro_transition(imu660rx_gyro_x) * deg2rad;
-    float gy = imu660rx_gyro_transition(imu660rx_gyro_y) * deg2rad;
+    float gy = imu660rx_gyro_transition_filtered(imu660rx_gyro_y) * deg2rad;
     float gz = imu660rx_gyro_transition(imu660rx_gyro_z) * deg2rad;
 
     // acc: g（Mahony内部会归一化）
     float ax = imu660rx_acc_transition(imu660rx_acc_x);
-    float ay = imu660rx_acc_transition(imu660rx_acc_y);
+    float ay = imu660rx_acc_transition_filtered(imu660rx_acc_y);
     float az = imu660rx_acc_transition(imu660rx_acc_z);
 
     ahrs_mahony_update_imu(s, gx, gy, gz, ax, ay, az, dt_s);

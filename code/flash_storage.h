@@ -86,6 +86,74 @@ uint8 flash_storage_save_slope_cfg(void);
 uint8 flash_storage_load_kemu3_seg(void);
 uint8 flash_storage_save_kemu3_seg(void);
 
+// ============================================================================
+// Flash 参数存储 —— RC Yaw 录制轨迹（50ms采样数组）
+//
+// 说明：
+// - 使用 DFLASH 第 2 页存储。
+// - yaw_points 为外部提供的 float 数组，count 为有效点数。
+// - load 时按 max_points 做上限保护，实际点数通过 out_count 返回。
+// ============================================================================
+uint8 flash_storage_save_rc_yaw_record(const float *yaw_points, uint16 count);
+uint8 flash_storage_load_rc_yaw_record(float *yaw_points, uint16 max_points, uint16 *out_count);
+
+// ============================================================================
+// Flash 参数存储 —— 杂项配置（MISC）
+//
+// 说明：
+// - 集中存放目前未单独建页的“菜单可调但未持久化”的参数。
+// - 后续新增杂项数据应优先塞入 reserved[]，无需新建 flash 页。
+// - 结构体按 4 字节对齐，reserved 预留 128 字节以供扩展。
+// ============================================================================
+
+#ifndef FLASH_STORAGE_SECTOR_MISC
+#define FLASH_STORAGE_SECTOR_MISC   (0u)
+#endif
+#ifndef FLASH_STORAGE_PAGE_MISC
+#define FLASH_STORAGE_PAGE_MISC     (3u)   // 页号范围 1~11，3 目前空闲
+#endif
+
+typedef struct
+{
+    // ---- SPCH_DBG（3 项） ----
+    uint8  fit_mode;                       // g_ttop_speed_change_fit_mode
+    uint8  _pad0[3];
+    float  lpf_alpha;                      // g_ttop_speed_change_lpf_alpha
+    float  pitch_angle_lpf_alpha;          // g_pitch_angle_lpf_alpha
+    float  pitch_zero_offset_deg;          // g_pitch_zero_offset_deg
+
+    // ---- KEMU3_DBG 额外参数（5 项） ----
+    uint8  ex2_loop_count;                 // g_ttop_kemu3_ex2_loop_count
+    uint8  _pad1[3];
+    float  kemu3_end_target_rel_deg;       // g_ttop_kemu3_end_seg.target_rel_deg
+    float  kemu3_end_rate_dps;             // g_ttop_kemu3_end_seg.rate_dps
+    float  yaw_zero_offset_deg;            // g_yaw_zero_offset_deg
+    float  kemu3_yaw_ki_path;              // g_kemu3_yaw_ki_path
+    int    kemu3_counts_per_meter;         // g_ttop_kemu3_counts_per_meter
+
+    // ---- MOTOR_PID（6 项） ----
+    float  motor_kp;
+    float  motor_ki;
+    float  motor_kd;
+    float  motor_pitch_boost_threshold;
+    float  motor_pitch_boost_k;
+    float  motor_pitch_boost_max;
+    uint8  motor_pitch_boost_enable;
+    uint8  _pad2[3];
+
+    // ---- 预留扩展区（后续新增杂项直接使用此区域） ----
+    uint8  reserved[128];
+
+} flash_misc_cfg_t;
+
+// 加载杂项配置：Flash → 全局变量
+// 成功返回 1，失败（未保存/校验失败）返回 0
+uint8 flash_storage_load_misc_cfg(void);
+
+// 保存杂项配置：全局变量 → Flash
+// 成功返回 1，失败返回 0
+uint8 flash_storage_save_misc_cfg(void);
+
 #ifdef __cplusplus
 }
 #endif

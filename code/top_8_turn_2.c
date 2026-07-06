@@ -243,30 +243,6 @@ void ttop_eight2_reset_now(void)
 uint8 ttop_eight2_task_5ms(void)
 {
 #if (TTOP_EIGHT2_ENABLE)
-	// // 停机后不再规划，且保持 yaw 指令为 0
-	// if (ttop_stop_is_active())
-	// {
-	// 	s_eight2.done = 0u;
-	// 	s_eight2.started = 0u;
-	// 	s_eight2.seg_idx = 0u;
-	// 	s_eight2.inpos_ticks = 0u;
-	// 	s_eight2.yaw_out_deg = 0.0f;
-	// 	s_eight2.yaw_target_abs_deg = 0.0f;
-	// 	g_yaw_target_deg = 0.0f;
-	// 	return 0u;
-	// }
-
-	// // yaw 延时置零未完成时，不做规划
-	// if (!ttop_yaw_delay_done_local())
-	// {
-	// 	s_eight2.started = 0u;
-	// 	s_eight2.seg_idx = 0u;
-	// 	s_eight2.inpos_ticks = 0u;
-	// 	s_eight2.yaw_out_deg = 0.0f;
-	// 	s_eight2.yaw_target_abs_deg = 0.0f;
-	// 	g_yaw_target_deg = 0.0f;
-	// 	return 0u;
-	// }
 
 	// 首次进入：按段表选择基准角。
 	// - MAIN/EX1：base0=0
@@ -328,8 +304,3 @@ uint8 ttop_eight2_task_5ms(void)
 #endif
 }
 
-// static inline uint8 ttop_yaw_delay_done_local(void)
-// {
-// 	const led_bzw_show_status_t *st = led_bzw_show_status_get();
-// 	return (st && st->yaw_delay_done) ? 1u : 0u;
-// }

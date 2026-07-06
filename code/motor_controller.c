@@ -17,6 +17,8 @@
 
 // pitch 角（deg），由 IMU 任务在 common_flie.c 中更新；这里用于“要倒下就加速”的策略
 extern float show_pitch_deg;
+// 舵机控制量（相对舵机中心点的偏移），在 common_flie.c 中由姿态环更新。
+extern float ips_show_pid_out;
 
 
 // ============================ 简易本地 PID 结构体（独立于 common_flie） ============================
@@ -41,6 +43,7 @@ volatile float motor_ff_out = 0.0f;
 volatile int16 motor_speed_raw_counts = 0;
 volatile float motor_speed_filtered_counts = 0.0f;
 volatile uint32 count_motor_pid = 0;
+volatile float motor_pitch_boost_counts = 0.0f;
 
 // 保存上一次输出的 duty（用于斜率限幅）
 static int16 s_prev_duty = 0;
@@ -49,6 +52,14 @@ static int16 s_prev_duty = 0;
 static volatile int16 g_motor_target_counts = 0;
 // 目标速度偏置（单位：counts per 5ms）
 static volatile int16 g_motor_target_offset_counts = 0;
+
+// 基于 |servo_out|（相对舵机中心0点）的瞬时力矩补偿：
+// delta = k * (|servo_out| - threshold), |servo_out|>threshold 时生效
+// 兼容原菜单字段：PIT_EN/PIT_TH/PIT_K（仅语义从 pitch 改为 servo）。
+static volatile uint8 g_pitch_speed_boost_enable = 0u;
+static volatile float g_pitch_speed_boost_threshold_deg = 0.3f;
+static volatile float g_pitch_speed_boost_k_counts_per_deg = 1.0f;
+static volatile float g_pitch_speed_boost_max_counts = 300.0f;
 
 // 启动控制逻辑已简化，软起动/推动启动相关类型已移除
 
@@ -118,6 +129,82 @@ void motor_get_feedforward_gains(float *k_s, float *k_v)
     if (k_v) *k_v = g_motor_ff_k_v;
 }
 
+void motor_set_pid_gains(float kp, float ki, float kd)
+{
+    g_motor_pid.kp = kp;
+    g_motor_pid.ki = ki;
+    g_motor_pid.kd = kd;
+}
+
+void motor_get_pid_gains(float *kp, float *ki, float *kd)
+{
+    if (kp) *kp = g_motor_pid.kp;
+    if (ki) *ki = g_motor_pid.ki;
+    if (kd) *kd = g_motor_pid.kd;
+}
+
+void motor_set_pitch_speed_boost_enable(uint8 enable)
+{
+    g_pitch_speed_boost_enable = (enable != 0u) ? 1u : 0u;
+}
+
+uint8 motor_get_pitch_speed_boost_enable(void)
+{
+    return g_pitch_speed_boost_enable;
+}
+
+void motor_set_pitch_speed_boost_params(float threshold_abs_deg, float k_counts_per_deg)
+{
+    if (threshold_abs_deg < 0.0f) threshold_abs_deg = 0.0f;
+    if (k_counts_per_deg < 0.0f) k_counts_per_deg = 0.0f;
+    g_pitch_speed_boost_threshold_deg = threshold_abs_deg;
+    g_pitch_speed_boost_k_counts_per_deg = k_counts_per_deg;
+}
+
+void motor_get_pitch_speed_boost_params(float *threshold_abs_deg, float *k_counts_per_deg)
+{
+    if (threshold_abs_deg) *threshold_abs_deg = g_pitch_speed_boost_threshold_deg;
+    if (k_counts_per_deg) *k_counts_per_deg = g_pitch_speed_boost_k_counts_per_deg;
+}
+
+void motor_set_pitch_speed_boost_max_counts(float max_counts)
+{
+    if (max_counts < 0.0f) max_counts = 0.0f;
+    g_pitch_speed_boost_max_counts = max_counts;
+}
+
+float motor_get_pitch_speed_boost_max_counts(void)
+{
+    return g_pitch_speed_boost_max_counts;
+}
+
+float motor_get_pitch_speed_boost_counts(void)
+{
+    return motor_pitch_boost_counts;
+}
+
+static float motor_compute_pitch_speed_boost_counts(void)
+{
+    if (g_pitch_speed_boost_enable == 0u)
+    {
+        return 0.0f;
+    }
+
+    // 舵机0点按控制量 out=0 定义；这里直接使用姿态环输出量绝对值。
+    float abs_servo_out = fabsf(ips_show_pid_out);
+    float threshold = g_pitch_speed_boost_threshold_deg;
+    if (abs_servo_out <= threshold)
+    {
+        return 0.0f;
+    }
+
+    {
+        float boost = g_pitch_speed_boost_k_counts_per_deg * (abs_servo_out - threshold);
+        if (boost > g_pitch_speed_boost_max_counts) boost = g_pitch_speed_boost_max_counts;
+        return boost;
+    }
+}
+
 // 斜率限幅函数：根据全局参数与上次输出限制当前 duty 的变化，返回限制后的 duty
 static int16 apply_duty_slope_limit(int16 duty)
 {
@@ -171,7 +258,7 @@ void motor_pid_init(void)
     motor_pid_init_default(&g_motor_pid);
     // 默认增益；后续可考虑提供 setter 接口集中调参
     g_motor_pid.kp = 10.0f;
-    g_motor_pid.ki = 30.0f;
+    g_motor_pid.ki = 10.0f;
     g_motor_pid.kd = 0.0f;
 
     // 输出限幅与积分限幅初始化（放这里以便集中配置）
@@ -183,6 +270,7 @@ void motor_pid_init(void)
     motor_speed_filtered_counts = 0.0f;
     motor_pid_out = 0.0f;
     motor_ff_out = 0.0f;
+    motor_pitch_boost_counts = 0.0f;
     motor_speed_raw_counts = 0;
     count_motor_pid = 0;
 }
@@ -203,6 +291,7 @@ void motor_clear_speed(void)
 {
     motor_speed_raw_counts = 0;
     motor_speed_filtered_counts = 0.0f;
+    motor_pitch_boost_counts = 0.0f;
     motor_pid_reset();
     // 清除编码器层的速度缓存并重置硬件计数器
     encoder_clear_demo5_speed();
@@ -260,6 +349,7 @@ void motor_control_task_5ms(void)
     // 在获取并滤波当前速度后（软起动/推动启动逻辑已移除）
     
     // 目标与测量（单位相同）
+    motor_pitch_boost_counts = motor_compute_pitch_speed_boost_counts();
     float setpoint = (float)g_motor_target_counts + (float)g_motor_target_offset_counts;
     if (setpoint < 0.0f) setpoint = 0.0f;
     float measurement = motor_speed_filtered_counts;
@@ -269,6 +359,12 @@ void motor_control_task_5ms(void)
     float pid_out = -motor_pid_compute(&g_motor_pid, setpoint, measurement, MOTOR_PID_DT_S);
     float ff_out = motor_compute_feedforward(setpoint);
     float out = pid_out + ff_out;
+    // 舵机补偿直接作用在最终输出端，提供瞬时力矩。
+    {
+        float sgn = motor_signf(out);
+        if (sgn == 0.0f) sgn = motor_signf(setpoint);
+        out += sgn * motor_pitch_boost_counts;
+    }
     motor_pid_out = pid_out;
     motor_ff_out = ff_out;
 

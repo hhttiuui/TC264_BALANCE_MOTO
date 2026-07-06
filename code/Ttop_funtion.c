@@ -12,6 +12,7 @@
 #include "gps_key_led.h"
 #include "gps_Azimuth.h"
 #include "ttop_kemu3.h"
+#include "Menu.h"
 #include <stdio.h>
 
 
@@ -45,6 +46,7 @@ void ttop_funtion_mode_once_apply(void)
 	}
 	else if (funtion_kemu == 3u)// MODE3：直线速度55
 	{
+		ttop_rc_control_init();
 		PID_INIT_BY_MODE(PID_MODE_DAMPED_TWO);
 	}
 	else if (funtion_kemu == 4u)// MODE4：直线速度45
@@ -60,7 +62,7 @@ void ttop_funtion_mode_once_apply(void)
 	else if (funtion_kemu == 6u)// MODE6：8字
 	{
 		ttop_eight2_select_program(TTOP_EIGHT2_PROG_MAIN);
-		PID_INIT_BY_MODE(PID_MODE_DAMPED_THREE);
+		PID_INIT_BY_MODE(PID_MODE_DAMPED_TWO);
 		ttop_eight2_init();
 	}
 	else if (funtion_kemu == 7u)// MODE7：kemu3
@@ -106,11 +108,7 @@ void ttop_funtion_mode_once_apply(void)
 //=======编码器+电机控制任务，5ms调用一次=======//
 void ttop_encoder_task_5ms(void)
 {
-	
-	//if (!encoder_flag) return;
-	//if (!ttop_yaw_delay_done()) return;
 	if (!funtion_ready_flag) return;
-	if (ttop_stop_is_active()) return;
 	gpio_toggle_level(P21_2);
 	encoder_flag = 0;
 	encoder_tim5_demo_update_5ms();// 编码器速度 5ms 更新函数
@@ -125,95 +123,6 @@ volatile uint16 eight_count = 0;
 
 
 //=======PID任务，5ms调用一次=======//
-
-void ttop_pid_task_5ms(void)
-{
-	if (!funtion_ready_flag) return;
-
-	gpio_toggle_level(P21_2);
-	pid_flag = 0;
-
-
-	if(funtion_kemu == 1)// MODE1：直线速度200
-	{		
-		pid_timer_handler_by_mode(PID_MODE_CASCADE);
-	}
-	else if(funtion_kemu == 2)//变速
-	{		
-		ttop_speed_change_task_5ms();
-	}
-	else if(funtion_kemu == 3)// MODE3：直线速度55
-	{	
-		pid_timer_handler_by_mode(PID_MODE_DAMPED_TWO);
-	}
-	else if(funtion_kemu == 4)// MODE4：直线速度45
-	{	
-		pid_timer_handler_by_mode(PID_MODE_DAMPED_THREE);
-	}
-	else if(funtion_kemu == 5)// MODE5：直线速度200+转弯
-	{
-		if(encoder_get_demo5_count_total()>18000)
-		{			
-			ttop_eight2_task_5ms();
-		}
-		pid_timer_handler_by_mode(PID_MODE_CASCADE);
-	}
-	else if(funtion_kemu == 6)// MODE6：8字
-	{
-		
-		if(eight_count++>300)eight_flag = 1; //延时一段时间
-		if(eight_flag)ttop_eight2_task_5ms();
-		pid_timer_handler_by_mode(PID_MODE_DAMPED_THREE);
-	}
-	else if(funtion_kemu == 7)// MODE7：kemu3
-	{
-		ttop_kemu3_task_5ms();
-		ttop_speed_change_task_5ms();
-	}
-	else if(funtion_kemu == 8)// MODE8：
-	{
-		pid_timer_handler_by_mode(PID_MODE_CASCADE_EX2);
-	}
-	else if(funtion_kemu == 9)// MODE9：惯导 - 示教录制
-	{
-		// 录制任务：更新航迹推算 + 按距离记录航点
-		if(eight_count++>300)eight_flag = 1;
-		if(eight_flag)ins_path_record_task_5ms();
-
-		ttop_rc_control_task_5ms();
-		ttop_speed_change_task_5ms();
-
-		// PID 照常运行（保持平衡/可控）
-		//pid_timer_handler_by_mode(PID_MODE_DAMPED_THREE);
-	}
-	else if(funtion_kemu == 10)// MODE10：惯导 - 自动跟踪
-	{
-		// 跟踪任务：更新航迹推算 + Pure Pursuit 计算目标航向 → 自动写 g_yaw_target_deg
-		if(eight_count++>300)eight_flag = 1; 
-		if(eight_flag)ins_path_follow_task_5ms();
-
-		// PID 链路根据 g_yaw_target_deg 执行转向
-		pid_timer_handler_by_mode(PID_MODE_DAMPED_THREE);
-	}
-	else if(funtion_kemu == 11)// MODE11：RC预留
-	{
-		ttop_rc_control_task_5ms();
-		ttop_speed_change_task_5ms();
-	}
-	else if(funtion_kemu == 12)// MODE12：预留
-	{		
-		pid_timer_handler_by_mode(PID_MODE_CASCADE_EX2);
-	}
-	else
-	{
-		// 未选择/其它值：不输出
-	}
-	ttop_rc_control_emergency_stop_now();
-	gpio_toggle_level(P21_2);
-
-	
-}
-
 void ttop_funtion_new(void)
 {
 	gpio_toggle_level(P22_2);
@@ -231,7 +140,14 @@ void ttop_funtion_new(void)
 
 	}
 	// MODE3：直线速度55
-	else if(funtion_kemu == 3){}
+	else if(funtion_kemu == 3)
+	{
+		// MODE3：统一调用三个 5ms 函数，是否执行由函数内部按标志位判断。
+		ttop_rc_control_yaw_only_task_5ms();
+		ttop_rc_yaw_record_task_5ms();
+		ttop_rc_yaw_replay_task_5ms();
+
+	}
 	// MODE4：直线速度45
 	else if(funtion_kemu == 4){}
 	// MODE5：直线速度200+转弯
@@ -325,7 +241,7 @@ void ttop_funtion_init(void)
     ips200_init(IPS200_TYPE);
 
     Key_init();                 // 按键初始化
-
+	motor_pid_init();  // 电机速度环 PID 初始化
     //PID_INIT_NO_RATE();         // 舵机PID 初始化，NO_RATE->无角速度环版本
     // 上电加载：从 Flash 恢复 PID 配置表与八字段表
     // 说明：
@@ -340,12 +256,13 @@ void ttop_funtion_init(void)
 	(void)flash_storage_load_kemu1_cfg();
 	(void)flash_storage_load_slope_cfg();
 	(void)flash_storage_load_kemu3_seg();
+	(void)flash_storage_load_misc_cfg();
 
 	// 舵机 PID 初始化：按当前模式（funtion_kemu）初始化一次
 	// funtion_kemu 与菜单模式对齐：1..12；PID_INIT_BY_MODE 使用 pid_mode_t
     // 这里沿用上电默认 MODE1（cascade）；如果你上电希望跟随菜单选择，可以在 load 后先同步 funtion_kemu。
     PID_INIT_BY_MODE(PID_MODE_CASCADE);
-    motor_pid_init();           // 电机速度环 PID 初始化
+             
     encoder_tim5_demo_init();   // 编码器初始化
     imu660rx_init();            // 陀螺仪
     //imu660ra_init();            // 陀螺仪
@@ -358,8 +275,6 @@ void ttop_funtion_init(void)
     ins_dr_init();
 	roll_slope_speed_init(); // 坡度补偿模块初始化
 
-    // 赛事功能：里程到点停机 初始化
-    ttop_stop_init();
 	gps_nav_init();
 }
 

@@ -86,7 +86,7 @@ uint8_t enable_flag = 0;
 static uint8_t s_gps_nav_div20 = 0u;
 static uint16 s_gps_storage_div100 = 0u;
 
-uint16 period_2ms_count = 0,period_5ms_count = 0,period_10ms_count = 0;
+uint16 period_1ms_count = 0,period_2ms_count = 0,period_5ms_count = 0,period_10ms_count = 0;
 
 IFX_INTERRUPT(cc61_pit_ch0_isr, 0, CCU6_1_CH0_ISR_PRIORITY)
 {
@@ -105,8 +105,8 @@ IFX_INTERRUPT(cc61_pit_ch0_isr, 0, CCU6_1_CH0_ISR_PRIORITY)
     //2ms陀螺仪+2ms角速度环+4ms角度环+8msyaw环
     if(enable_flag)
     {
-
-        if(period_2ms_count == 0)imu_task_handler_2ms();
+        if(period_1ms_count == 0)imu_task_handler_2ms();
+        //if(period_2ms_count == 0)imu_task_handler_2ms();
         if(period_2ms_count == 1)pid_timer_handler_multirate_2ms();
 
         if(period_5ms_count == 0)Key_Sample();
@@ -114,6 +114,8 @@ IFX_INTERRUPT(cc61_pit_ch0_isr, 0, CCU6_1_CH0_ISR_PRIORITY)
    
         if(period_10ms_count == 0)ttop_encoder_task_5ms();
 
+        period_1ms_count++;
+        if(period_1ms_count>=1)period_1ms_count = 0;
         period_2ms_count++;
         if(period_2ms_count>=2)period_2ms_count = 0;
         period_5ms_count++;

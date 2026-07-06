@@ -38,6 +38,22 @@ float motor_get_duty_slope_limit_percent_per_s(void);
 void motor_set_feedforward_gains(float k_s, float k_v);
 void motor_get_feedforward_gains(float *k_s, float *k_v);
 
+// 设置/获取电机速度环 PID 参数
+void motor_set_pid_gains(float kp, float ki, float kd);
+void motor_get_pid_gains(float *kp, float *ki, float *kd);
+
+// 基于 |pitch| 的目标速度增益：
+// - enable=1 时，当 |pitch| > threshold_abs_deg，额外速度增量为
+//   k_counts_per_deg * (|pitch| - threshold_abs_deg)
+// - 额外增量会叠加到目标速度上
+void motor_set_pitch_speed_boost_enable(uint8 enable);
+uint8 motor_get_pitch_speed_boost_enable(void);
+void motor_set_pitch_speed_boost_params(float threshold_abs_deg, float k_counts_per_deg);
+void motor_get_pitch_speed_boost_params(float *threshold_abs_deg, float *k_counts_per_deg);
+void motor_set_pitch_speed_boost_max_counts(float max_counts);
+float motor_get_pitch_speed_boost_max_counts(void);
+float motor_get_pitch_speed_boost_counts(void);
+
 // 根据倾角自适应调整目标速度：
 // - threshold_deg: 倒下阈值（deg），超过则进入“救车加速”
 // - speed_fall: 超阈值时设置的目标速度（counts/5ms）
@@ -57,6 +73,7 @@ extern volatile float motor_ff_out;              // 前馈输出（映射到 dut
 extern volatile int16 motor_speed_raw_counts;    // 原始编码器 delta
 extern volatile float motor_speed_filtered_counts; // 滤波后的速度
 extern volatile uint32 count_motor_pid;          // 调用计数
+extern volatile float motor_pitch_boost_counts;  // 基于 |pitch| 的速度增量（counts/5ms）
 
 // 启动控制接口已移除：软起动/推动启动相关逻辑在当前实现中不再使用。
 

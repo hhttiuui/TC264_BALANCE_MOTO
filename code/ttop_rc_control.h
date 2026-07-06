@@ -41,6 +41,29 @@ void ttop_rc_control_emergency_stop_now(void);
 void ttop_rc_control_task_5ms(void);
 // 仅根据 RC 调整速度（不改变 yaw 目标）
 void ttop_rc_control_speed_only_task_5ms(void);
+// 仅根据 RC 调整方向（不改变速度目标）
+void ttop_rc_control_yaw_only_task_5ms(void);
+
+// ============================ RC Yaw 轨迹录制/回放（50ms采样） ============================
+// 录制：在 5ms 调用函数内部累计到 50ms 采样一次 g_yaw_target_deg 到数组
+void ttop_rc_yaw_record_start(void);
+void ttop_rc_yaw_record_stop(void);
+void ttop_rc_yaw_record_task_5ms(void);
+
+// 回放：在 5ms 调用函数内部累计到 50ms 读取一个记录点并写入 g_yaw_target_deg
+void ttop_rc_yaw_replay_start(void);
+void ttop_rc_yaw_replay_stop(void);
+void ttop_rc_yaw_replay_task_5ms(void);
+
+// 存储：调用时执行一次存储/加载（使用 DFLASH 第 2 页）
+uint8 ttop_rc_yaw_record_save_to_flash(void);
+uint8 ttop_rc_yaw_record_load_from_flash(void);
+
+// 状态查询
+uint8 ttop_rc_yaw_record_is_active(void);
+uint8 ttop_rc_yaw_replay_is_active(void);
+uint16 ttop_rc_yaw_record_get_count(void);
+uint16 ttop_rc_yaw_replay_get_index(void);
 
 #ifdef __cplusplus
 }

@@ -55,6 +55,8 @@ typedef enum
     UI_PAGE_KKF_KEMU3_DBG = 30,      // 界面1_1_15：kemu3 子菜单
     UI_PAGE_KKF_KEMU3_PATH = 31,     // kemu3 路径参数
     UI_PAGE_KKF_SLOPE_DBG = 32,      // 坡道速度参数
+    UI_PAGE_KKF_MOTOR_PID = 33,      // 电机 PID 参数调试
+    UI_PAGE_KKF_RC_YAW_CFG = 34,     // MODE3: RC yaw 功能开关
     UI_PAGE_KKF_SPCH_DBG = 27,       // 界面1_1_14：速度变化调试
     UI_PAGE_KKF_GPS_CIRCLE = 28,     // 界面：单点绕圈 GPS 调试
     UI_PAGE_KKF_GPS_STORAGE = 29,    // 界面：GPS 实时存点轨迹显示
@@ -84,6 +86,20 @@ static volatile uint8 s_kkf_mode_item = 1u;
 static volatile uint8 s_kkf_eight_turn_item = 1u;
 static volatile uint8 s_kkf_pid_item = 1u;
 static volatile uint8 s_kkf_spch_item = 1u;
+
+// MODE3 RC Yaw 配置页状态
+static volatile uint8 s_kkf_rc_yaw_cfg_item = 1u;
+static volatile uint8 s_kkf_rc_yaw_cfg_edit = 0u; // 0=select, 1=edit
+
+// MODE3 RC Yaw 菜单配置开关（可在菜单中编辑）
+static volatile uint8 s_mode3_cfg_yaw_only = 1u;
+static volatile uint8 s_mode3_cfg_record = 0u;
+static volatile uint8 s_mode3_cfg_replay = 0u;
+
+// MODE3 RC Yaw 运行开关（START 时由 cfg 锁存）
+static volatile uint8 s_mode3_run_yaw_only = 0u;
+static volatile uint8 s_mode3_run_record = 0u;
+static volatile uint8 s_mode3_run_replay = 0u;
 
 // GPS 调试子菜单当前选项（1..5），用于 kkf_gps_debug_draw / Menu_Select
 static volatile uint8 s_kkf_gps_item = 1u;
@@ -277,7 +293,9 @@ typedef enum
 {
     KKF_SPCH_FIELD_FIT_MODE = 1u,
     KKF_SPCH_FIELD_LPF_ALPHA,
-    KKF_SPCH_FIELD_COUNT = KKF_SPCH_FIELD_LPF_ALPHA,
+    KKF_SPCH_FIELD_ANG_LPF,
+    KKF_SPCH_FIELD_PITCH_ZERO,
+    KKF_SPCH_FIELD_COUNT = KKF_SPCH_FIELD_PITCH_ZERO,
 } kkf_spch_field_t;
 
 typedef enum
@@ -287,6 +305,27 @@ typedef enum
 } kkf_spch_state_t;
 
 static volatile kkf_spch_state_t s_kkf_spch_state = KKF_SPCH_STATE_SEL;
+
+typedef enum
+{
+    KKF_MOTOR_PID_FIELD_KP = 1u,
+    KKF_MOTOR_PID_FIELD_KI,
+    KKF_MOTOR_PID_FIELD_KD,
+    KKF_MOTOR_PID_FIELD_PITCH_EN,
+    KKF_MOTOR_PID_FIELD_PITCH_TH,
+    KKF_MOTOR_PID_FIELD_PITCH_K,
+    KKF_MOTOR_PID_FIELD_PITCH_BMAX,
+    KKF_MOTOR_PID_FIELD_COUNT = KKF_MOTOR_PID_FIELD_PITCH_BMAX,
+} kkf_motor_pid_field_t;
+
+typedef enum
+{
+    KKF_MOTOR_PID_STATE_SEL = 0u,
+    KKF_MOTOR_PID_STATE_EDIT = 1u,
+} kkf_motor_pid_state_t;
+
+static volatile kkf_motor_pid_state_t s_kkf_motor_pid_state = KKF_MOTOR_PID_STATE_SEL;
+static volatile uint8 s_kkf_motor_pid_item = 1u;
 
 // 模式：1~12（与顶层 funtion_kemu 对齐）
 static volatile uint8 s_kkf_mode = 1u;
@@ -478,6 +517,8 @@ static void kkf_param_draw(void)
     //   SPCH_DBG（速度变化调试）
     //   KEMU1_DBG（kemu1 段表）
     //   KEMU3_DBG（kemu3 段表）
+    //   MOTOR_PID（电机 PID）
+    //   RC_YAW_CFG（MODE3: yaw/record/replay 开关）
     ips200_show_string(0, 0 * 15, "KOU_KOU_FLY_CAR");
     ips200_show_string(16, 1 * 15, "MODE SEL:");
     ips200_show_string(16 * 8, 1 * 15, (char *)kkf_mode_str(s_kkf_mode));
@@ -493,6 +534,8 @@ static void kkf_param_draw(void)
     ips200_show_string(16, 9 * 15, "SPCH_DBG");
     ips200_show_string(16, 10 * 15, "KEMU1_DBG");
     ips200_show_string(16, 11 * 15, "KEMU3_DBG");
+    ips200_show_string(16, 12 * 15, "MOTOR_PID");
+    ips200_show_string(16, 13 * 15, "RC_YAW_CFG");
 
     ips200_show_string(0, s_kkf_param_item * 15, "> ");
 
@@ -530,7 +573,101 @@ static void kkf_spch_dbg_draw(void)
     ips200_show_string(16, 4 * 15, "LPF_ALPHA:");
     ips200_show_float(16 * 8, 4 * 15, g_ttop_speed_change_lpf_alpha, 4, 2);
 
+    ips200_show_string(16, 5 * 15, "ANG_LPF:");
+    ips200_show_float(16 * 8, 5 * 15, g_pitch_angle_lpf_alpha, 5, 3);
+
+    ips200_show_string(16, 6 * 15, "PITCH_Z :");
+    ips200_show_float(16 * 8, 6 * 15, g_pitch_zero_offset_deg, 6, 2);
+
     ips200_show_string(0, (uint16)((2u + (uint16)s_kkf_spch_item) * 15u), cursor);
+
+    kkf_draw_signature_bottom();
+}
+
+static const char *kkf_on_off_str(uint8 on)
+{
+    return (on != 0u) ? "ON" : "OFF";
+}
+
+static void kkf_rc_yaw_cfg_draw(void)
+{
+    char cursor[3] = ">";
+    if (s_kkf_rc_yaw_cfg_edit) cursor[0] = '-';
+
+    ips200_show_string(0, 0 * 15, "KOU_KOU_FLY_CAR");
+    ips200_show_string(16, 1 * 15, "RC_YAW_CFG");
+
+    ips200_show_string(16, 3 * 15, "YAW_ONLY:");
+    ips200_show_string(16 * 8, 3 * 15, (char *)kkf_on_off_str(s_mode3_cfg_yaw_only));
+
+    ips200_show_string(16, 4 * 15, "RECORD :");
+    ips200_show_string(16 * 8, 4 * 15, (char *)kkf_on_off_str(s_mode3_cfg_record));
+
+    ips200_show_string(16, 5 * 15, "REPLAY :");
+    ips200_show_string(16 * 8, 5 * 15, (char *)kkf_on_off_str(s_mode3_cfg_replay));
+
+    ips200_show_string(16, 7 * 15, "RUN_YAW:");
+    ips200_show_string(16 * 8, 7 * 15, (char *)kkf_on_off_str(s_mode3_run_yaw_only));
+    ips200_show_string(16, 8 * 15, "RUN_REC:");
+    ips200_show_string(16 * 8, 8 * 15, (char *)kkf_on_off_str(s_mode3_run_record));
+    ips200_show_string(16, 9 * 15, "RUN_REP:");
+    ips200_show_string(16 * 8, 9 * 15, (char *)kkf_on_off_str(s_mode3_run_replay));
+
+    ips200_show_string(0, (uint16)((uint16)(2u + s_kkf_rc_yaw_cfg_item) * 15u), cursor);
+
+    kkf_draw_signature_bottom();
+}
+
+static void kkf_motor_pid_draw(void)
+{
+    float kp = 0.0f;
+    float ki = 0.0f;
+    float kd = 0.0f;
+    float pitch_th = 0.0f;
+    float pitch_k = 0.0f;
+    float pitch_bmax = 0.0f;
+    float pitch_boost = 0.0f;
+    uint8 pitch_en = 0u;
+    char cursor[3] = ">";
+
+    motor_get_pid_gains(&kp, &ki, &kd);
+    motor_get_pitch_speed_boost_params(&pitch_th, &pitch_k);
+    pitch_bmax = motor_get_pitch_speed_boost_max_counts();
+    pitch_en = motor_get_pitch_speed_boost_enable();
+    pitch_boost = motor_get_pitch_speed_boost_counts();
+    if (s_kkf_motor_pid_state == KKF_MOTOR_PID_STATE_EDIT) cursor[0] = '-';
+
+    ips200_show_string(0, 0 * 15, "KOU_KOU_FLY_CAR");
+    ips200_show_string(16, 1 * 15, "MOTOR_PID");
+
+    ips200_show_string(16, 3 * 15, "MOT_KP:");
+    ips200_show_float(16 * 8, 3 * 15, kp, 5, 2);
+
+    ips200_show_string(16, 4 * 15, "MOT_KI:");
+    ips200_show_float(16 * 8, 4 * 15, ki, 5, 2);
+
+    ips200_show_string(16, 5 * 15, "MOT_KD:");
+    ips200_show_float(16 * 8, 5 * 15, kd, 5, 2);
+
+    ips200_show_string(16, 6 * 15, "PIT_EN:");
+    ips200_show_string(16 * 8, 6 * 15, (pitch_en != 0u) ? "ON" : "OFF");
+
+    ips200_show_string(16, 7 * 15, "PIT_TH:");
+    ips200_show_float(16 * 8, 7 * 15, pitch_th, 5, 2);
+
+    ips200_show_string(16, 8 * 15, "PIT_K :");
+    ips200_show_float(16 * 8, 8 * 15, pitch_k, 5, 2);
+
+    ips200_show_string(16, 9 * 15, "PIT_BMX:");
+    ips200_show_float(16 * 8, 9 * 15, pitch_bmax, 5, 1);
+
+    ips200_show_string(16, 10 * 15, "BOOST:");
+    ips200_show_float(16 * 8, 10 * 15, pitch_boost, 5, 2);
+
+    ips200_show_string(16, 11 * 15, "DUTY :");
+    ips200_show_int(16 * 8, 11 * 15, (int32)show_duty, 6);
+
+    ips200_show_string(0, (uint16)((2u + (uint16)s_kkf_motor_pid_item) * 15u), cursor);
 
     kkf_draw_signature_bottom();
 }
@@ -1010,14 +1147,20 @@ typedef enum
 {
     KKF_PID_FIELD_AHRS_KP = 1u,
     KKF_PID_FIELD_YAW_KP,
+    KKF_PID_FIELD_YAW_KI,
     KKF_PID_FIELD_ANGLE_KP,
+    KKF_PID_FIELD_ANGLE_KI,
     KKF_PID_FIELD_ANGLE_KD,
+    KKF_PID_FIELD_ANGLE_MX_ABS,
+    KKF_PID_FIELD_ANGLE_IMX_ABS,
     KKF_PID_FIELD_RATE_KP,
+    KKF_PID_FIELD_RATE_KI,
     KKF_PID_FIELD_RATE_KD,
     KKF_PID_FIELD_DAMP_K,
     KKF_PID_FIELD_DAMP_MAX,
     KKF_PID_FIELD_MOTOR_TGT,
-    KKF_PID_FIELD_COUNT = KKF_PID_FIELD_MOTOR_TGT,
+    KKF_PID_FIELD_IMU_FILTER_ALPHA,
+    KKF_PID_FIELD_COUNT = KKF_PID_FIELD_IMU_FILTER_ALPHA,
 } kkf_pid_field_t;
 
 typedef enum
@@ -1053,13 +1196,19 @@ static void kkf_pid_draw_for_mode(pid_mode_t mode)
     // 显示字段：
     // 1 ahrs_kp
     // 2 yaw.kp
-    // 3 angle.kp
-    // 4 angle.kd
-    // 5 rate.kp（无则 0）
-    // 6 rate.kd
-    // 7 damp_k
-    // 8 damp_max
-    // 9 motor_target_counts_5ms
+    // 3 yaw.ki
+    // 4 angle.kp
+    // 5 angle.ki
+    // 6 angle.kd
+    // 7 angle |out|max（同时作用于 out_min/out_max）
+    // 8 angle |i|max（同时作用于 i_min/i_max）
+    // 9 rate.kp
+    // 10 rate.ki
+    // 11 rate.kd
+    // 12 damp_k
+    // 13 damp_max
+    // 14 motor_target_counts_5ms
+    // 15 imu_filter_alpha
     const pid_mode_cfg_t *cfg = &s_pid_mode_cfg[(uint16)mode];
 
     char cursor[3] = ">";
@@ -1088,26 +1237,44 @@ static void kkf_pid_draw_for_mode(pid_mode_t mode)
     ips200_show_string(16, 3 * 15, "YAW_KP :");
     ips200_show_float(16 * 9, 3 * 15, cfg->yaw.kp, 5, 2);
 
-    ips200_show_string(16, 4 * 15, "ANG_KP :");
-    ips200_show_float(16 * 9, 4 * 15, cfg->angle.kp, 5, 2);
+    ips200_show_string(16, 4 * 15, "YAW_KI :");
+    ips200_show_float(16 * 9, 4 * 15, cfg->yaw.ki, 5, 2);
 
-    ips200_show_string(16, 5 * 15, "ANG_KD :");
-    ips200_show_float(16 * 9, 5 * 15, cfg->angle.kd, 5, 2);
+    ips200_show_string(16, 5 * 15, "ANG_KP :");
+    ips200_show_int(16 * 9, 5 * 15, (int32)cfg->angle.kp, 6);
     
-    ips200_show_string(16, 6 * 15, "RATE_KP:");
-    ips200_show_float(16 * 9, 6 * 15, cfg->rate.kp, 5, 2);
+    ips200_show_string(16, 6 * 15, "ANG_KI :");
+    ips200_show_int(16 * 9, 6 * 15, (int32)cfg->angle.ki, 6);
 
-    ips200_show_string(16, 7 * 15, "RATE_KD:");
-    ips200_show_float(16 * 9, 7 * 15, cfg->rate.kd, 5, 2);
+    ips200_show_string(16, 7 * 15, "ANG_KD :");
+    ips200_show_float(16 * 9, 7 * 15, cfg->angle.kd, 5, 2);
 
-    ips200_show_string(16, 8 * 15, "DAMP_K :");
-    ips200_show_float(16 * 9, 8 * 15, cfg->damp_k, 5, 2);
+    ips200_show_string(16, 8 * 15, "A_MX   :");
+    ips200_show_float(16 * 9, 8 * 15, fabsf(cfg->angle.out_max), 5, 2);
 
-    ips200_show_string(16, 9 * 15, "DAMP_MX:");
-    ips200_show_float(16 * 9, 9 * 15, cfg->damp_max, 5, 2);
+    ips200_show_string(16, 9 * 15, "A_IMX  :");
+    ips200_show_float(16 * 9, 9 * 15, fabsf(cfg->angle.i_max), 5, 2);
 
-    ips200_show_string(16, 10 * 15, "MOT_TGT:");
-    ips200_show_int(16 * 9, 10 * 15, cfg->motor_target_counts_5ms, 6);
+    ips200_show_string(16, 10 * 15, "RATE_KP:");
+    ips200_show_float(16 * 9, 10 * 15, cfg->rate.kp, 5, 2);
+
+    ips200_show_string(16, 11 * 15, "RATE_KI:");
+    ips200_show_float(16 * 9, 11 * 15, cfg->rate.ki, 5, 2);
+
+    ips200_show_string(16, 12 * 15, "RATE_KD:");
+    ips200_show_float(16 * 9, 12 * 15, cfg->rate.kd, 5, 2);
+
+    ips200_show_string(16, 13 * 15, "DAMP_K :");
+    ips200_show_float(16 * 9, 13 * 15, cfg->damp_k, 5, 2);
+
+    ips200_show_string(16, 14 * 15, "DAMP_MX:");
+    ips200_show_float(16 * 9, 14 * 15, cfg->damp_max, 5, 2);
+
+    ips200_show_string(16, 15 * 15, "MOT_TGT:");
+    ips200_show_int(16 * 9, 15 * 15, cfg->motor_target_counts_5ms, 6);
+
+    ips200_show_string(16, 16 * 15, "IMU_ALP:");
+    ips200_show_float(16 * 9, 16 * 15, cfg->imu_filter_alpha, 5, 3);
 
     // 光标：行号 = 字段序号 + 1（因为从第2行开始显示字段）
     ips200_show_string(0, (uint16)((1u + (uint16)s_kkf_pid_item) * 15u), cursor);
@@ -1120,10 +1287,10 @@ static void kkf_pid_adjust_value(pid_mode_t mode, kkf_pid_field_t field, int8 di
     // dir: +1 / -1
     pid_mode_cfg_t *cfg = &s_pid_mode_cfg[(uint16)mode];
 
-    // 步进：ahrs/yaw/rate kp = 0.01；angle kp = 0.1；angle/rate kd = 0.01；damp/motor 保持原值
+    // 浮点项统一步进 0.1；长按由外层按 50 次重复调用实现（等效 5.0）。
     if (field == KKF_PID_FIELD_AHRS_KP)
     {
-        cfg->ahrs_kp += (dir > 0) ? 0.01f : -0.01f;
+        cfg->ahrs_kp += (dir > 0) ? 0.1f : -0.1f;
         if (cfg->ahrs_kp < 0.0f) cfg->ahrs_kp = 0.0f;
     }
     else if (field == KKF_PID_FIELD_YAW_KP)
@@ -1131,24 +1298,55 @@ static void kkf_pid_adjust_value(pid_mode_t mode, kkf_pid_field_t field, int8 di
         cfg->yaw.kp += (dir > 0) ? 0.01f : -0.01f;
         if (cfg->yaw.kp < 0.0f) cfg->yaw.kp = 0.0f;
     }
+    else if (field == KKF_PID_FIELD_YAW_KI)
+    {
+        cfg->yaw.ki += (dir > 0) ? 0.01f : -0.01f;
+        if (cfg->yaw.ki < 0.0f) cfg->yaw.ki = 0.0f;
+    }
     else if (field == KKF_PID_FIELD_ANGLE_KP)
     {
-        cfg->angle.kp += (dir > 0) ? 0.1f : -0.1f;
+        cfg->angle.kp += (dir > 0) ? 1.0f : -1.0f;
         if (cfg->angle.kp < 0.0f) cfg->angle.kp = 0.0f;
+    }
+    else if (field == KKF_PID_FIELD_ANGLE_KI)
+    {
+        cfg->angle.ki += (dir > 0) ? 1.0f : -1.0f;
+        if (cfg->angle.ki < 0.0f) cfg->angle.ki = 0.0f;
     }
     else if (field == KKF_PID_FIELD_ANGLE_KD)
     {
-        cfg->angle.kd += (dir > 0) ? 0.01f : -0.01f;
+        cfg->angle.kd += (dir > 0) ? 0.1f : -0.1f;
         if (cfg->angle.kd < 0.0f) cfg->angle.kd = 0.0f;
+    }
+    else if (field == KKF_PID_FIELD_ANGLE_MX_ABS)
+    {
+        float v = fabsf(cfg->angle.out_max) + ((dir > 0) ? 1.0f : -1.0f);
+        if (v < 0.0f) v = 0.0f;
+        if (v > 2000.0f) v = 2000.0f;
+        cfg->angle.out_max = v;
+        cfg->angle.out_min = -v;
+    }
+    else if (field == KKF_PID_FIELD_ANGLE_IMX_ABS)
+    {
+        float v = fabsf(cfg->angle.i_max) + ((dir > 0) ? 1.0f : -1.0f);
+        if (v < 0.0f) v = 0.0f;
+        if (v > 2000.0f) v = 2000.0f;
+        cfg->angle.i_max = v;
+        cfg->angle.i_min = -v;
     }
     else if (field == KKF_PID_FIELD_RATE_KP)
     {
-        cfg->rate.kp += (dir > 0) ? 0.01f : -0.01f;
+        cfg->rate.kp += (dir > 0) ? 0.1f : -0.1f;
         if (cfg->rate.kp < 0.0f) cfg->rate.kp = 0.0f;
+    }
+    else if (field == KKF_PID_FIELD_RATE_KI)
+    {
+        cfg->rate.ki += (dir > 0) ? 0.1f : -0.1f;
+        if (cfg->rate.ki < 0.0f) cfg->rate.ki = 0.0f;
     }
     else if (field == KKF_PID_FIELD_RATE_KD)
     {
-        cfg->rate.kd += (dir > 0) ? 0.01f : -0.01f;
+        cfg->rate.kd += (dir > 0) ? 0.1f : -0.1f;
         if (cfg->rate.kd < 0.0f) cfg->rate.kd = 0.0f;
     }
     else if (field == KKF_PID_FIELD_DAMP_K)
@@ -1158,15 +1356,21 @@ static void kkf_pid_adjust_value(pid_mode_t mode, kkf_pid_field_t field, int8 di
     }
     else if (field == KKF_PID_FIELD_DAMP_MAX)
     {
-        cfg->damp_max += (dir > 0) ? 1.0f : -1.0f;
+        cfg->damp_max += (dir > 0) ? 0.1f : -0.1f;
         if (cfg->damp_max < 0.0f) cfg->damp_max = 0.0f;
     }
-    else // MOTOR_TGT
+    else if (field == KKF_PID_FIELD_MOTOR_TGT)
     {
         int32 v = (int32)cfg->motor_target_counts_5ms + ((dir > 0) ? 1 : -1);
         if (v < 0) v = 0;
         if (v > 2000) v = 2000;
         cfg->motor_target_counts_5ms = (int16)v;
+    }
+    else // IMU_FILTER_ALPHA
+    {
+        cfg->imu_filter_alpha += (dir > 0) ? 0.001f : -0.001f;
+        if (cfg->imu_filter_alpha < 0.0f) cfg->imu_filter_alpha = 0.0f;
+        if (cfg->imu_filter_alpha > 1.0f) cfg->imu_filter_alpha = 1.0f;
     }
 }
 
@@ -1312,12 +1516,101 @@ static void kkf_slope_adjust_value(kkf_slope_field_t field, int8 dir)
     roll_slope_speed_set_cfg(&cfg);
 }
 
-// PID 编辑页长按加速：每次长按事件按短按步进执行 50 次
-#define KKF_PID_LONG_PRESS_EXTRA_STEPS   (50u)
+static void kkf_motor_pid_adjust_value(kkf_motor_pid_field_t field, int8 dir)
+{
+    float kp = 0.0f;
+    float ki = 0.0f;
+    float kd = 0.0f;
+    float pitch_th = 0.0f;
+    float pitch_k = 0.0f;
+    float pitch_bmax = 0.0f;
+    uint8 pitch_en = 0u;
+
+    motor_get_pid_gains(&kp, &ki, &kd);
+    motor_get_pitch_speed_boost_params(&pitch_th, &pitch_k);
+    pitch_bmax = motor_get_pitch_speed_boost_max_counts();
+    pitch_en = motor_get_pitch_speed_boost_enable();
+
+    if (field == KKF_MOTOR_PID_FIELD_KP)
+    {
+        kp += (dir > 0) ? 0.1f : -0.1f;
+        if (kp < 0.0f) kp = 0.0f;
+    }
+    else if (field == KKF_MOTOR_PID_FIELD_KI)
+    {
+        ki += (dir > 0) ? 0.1f : -0.1f;
+        if (ki < 0.0f) ki = 0.0f;
+    }
+    else if (field == KKF_MOTOR_PID_FIELD_KD)
+    {
+        kd += (dir > 0) ? 0.1f : -0.1f;
+        if (kd < 0.0f) kd = 0.0f;
+    }
+
+    else if (field == KKF_MOTOR_PID_FIELD_PITCH_EN)
+    {
+        if (dir > 0) pitch_en = 1u;
+        else pitch_en = 0u;
+    }
+    else if (field == KKF_MOTOR_PID_FIELD_PITCH_TH)
+    {
+        pitch_th += (dir > 0) ? 0.01f : -0.01f;
+        if (pitch_th < 0.0f) pitch_th = 0.0f;
+    }
+    else if (field == KKF_MOTOR_PID_FIELD_PITCH_K)
+    {
+        pitch_k += (dir > 0) ? 0.01f : -0.01f;
+        if (pitch_k < 0.0f) pitch_k = 0.0f;
+    }
+    else
+    {
+        pitch_bmax += (dir > 0) ? 1.0f : -1.0f;
+        if (pitch_bmax < 0.0f) pitch_bmax = 0.0f;
+    }
+
+    motor_set_pid_gains(kp, ki, kd);
+    motor_set_pitch_speed_boost_params(pitch_th, pitch_k);
+    motor_set_pitch_speed_boost_max_counts(pitch_bmax);
+    motor_set_pitch_speed_boost_enable(pitch_en);
+}
+
+static void kkf_spch_adjust_value(kkf_spch_field_t field, int8 dir)
+{
+    if (field == KKF_SPCH_FIELD_FIT_MODE)
+    {
+        int32 mode = (int32)g_ttop_speed_change_fit_mode + ((dir > 0) ? 1 : -1);
+        if (mode < 0) mode = 0;
+        if (mode > 2) mode = 2;
+        g_ttop_speed_change_fit_mode = (uint8)mode;
+    }
+    else if (field == KKF_SPCH_FIELD_LPF_ALPHA)
+    {
+        g_ttop_speed_change_lpf_alpha += (dir > 0) ? 0.01f : -0.01f;
+        if (g_ttop_speed_change_lpf_alpha < 0.0f) g_ttop_speed_change_lpf_alpha = 0.0f;
+        if (g_ttop_speed_change_lpf_alpha > 1.0f) g_ttop_speed_change_lpf_alpha = 1.0f;
+    }
+    else if (field == KKF_SPCH_FIELD_ANG_LPF)
+    {
+        g_pitch_angle_lpf_alpha += (dir > 0) ? 0.001f : -0.001f;
+        if (g_pitch_angle_lpf_alpha < 0.0f) g_pitch_angle_lpf_alpha = 0.0f;
+        if (g_pitch_angle_lpf_alpha > 0.999f) g_pitch_angle_lpf_alpha = 0.999f;
+    }
+    else
+    {
+        g_pitch_zero_offset_deg += (dir > 0) ? 0.01f : -0.01f;
+        if (g_pitch_zero_offset_deg < -45.0f) g_pitch_zero_offset_deg = -45.0f;
+        if (g_pitch_zero_offset_deg > 45.0f) g_pitch_zero_offset_deg = 45.0f;
+    }
+}
+
+// PID 编辑页长按加速：每次长按事件按短按步进执行 100 次
+#define KKF_PID_LONG_PRESS_EXTRA_STEPS   (100u)
 // KEMU1 编辑页长按加速：每次长按事件按短按步进执行 50 次
 #define KKF_KEMU1_LONG_PRESS_EXTRA_STEPS (50u)
 // 八字段表编辑页长按加速：每次长按事件按短按步进执行 50 次
 #define KKF_EIGHT_TURN_LONG_PRESS_EXTRA_STEPS (50u)
+// SPCH 编辑页长按加速：每次长按事件按短按步进执行 50 次
+#define KKF_SPCH_LONG_PRESS_EXTRA_STEPS (50u)
 
 // // 旧版菜单显示控制/状态信息
 // volatile uint8 menu_deep=1;     
@@ -1367,12 +1660,31 @@ void Menu_StartAll(void)
     {
         gps_nav_stop();
     }
+
+    // MODE3: START 时锁存配置开关，并执行对应 start 动作
+    if (funtion_kemu == 3u)
+    {
+        s_mode3_run_yaw_only = s_mode3_cfg_yaw_only;
+        s_mode3_run_record = s_mode3_cfg_record;
+        s_mode3_run_replay = s_mode3_cfg_replay;
+
+        if (s_mode3_run_record)
+        {
+            ttop_rc_yaw_record_start();
+        }
+        if (s_mode3_run_replay)
+        {
+            ttop_rc_yaw_replay_start();
+        }
+    }
 }
 
 void Menu_ResetAll(void)
 {
+    
     encoder_clear_demo5_count_total();
     ahrs_yaw_zero_request_set();
+    PID_CLEAR_INTEGRATORS();
     ttop_eight2_reset_now();
     small_driver_set_duty(0, 0);
     servo_zero();
@@ -1385,7 +1697,35 @@ void Menu_ResetAll(void)
     funtion_ready_flag = 0u;
     roll_slope_speed_reset();
     ttop_kemu3_reset();
+
+    // MODE3: STOP 时执行对应 stop 动作，并清运行开关
+    if (s_mode3_run_record)
+    {
+        ttop_rc_yaw_record_stop();
+    }
+    if (s_mode3_run_replay)
+    {
+        ttop_rc_yaw_replay_stop();
+    }
+    s_mode3_run_yaw_only = 0u;
+    s_mode3_run_record = 0u;
+    s_mode3_run_replay = 0u;
     
+}
+
+uint8 menu_mode3_run_yaw_only_enabled(void)
+{
+    return s_mode3_run_yaw_only;
+}
+
+uint8 menu_mode3_run_record_enabled(void)
+{
+    return s_mode3_run_record;
+}
+
+uint8 menu_mode3_run_replay_enabled(void)
+{
+    return s_mode3_run_replay;
 }
 
 void User_Interface(void)//UI显示
@@ -1449,6 +1789,14 @@ void User_Interface(void)//UI显示
         else if (s_ui_page == UI_PAGE_KKF_SLOPE_DBG)
         {
             kkf_slope_dbg_draw();
+        }
+        else if (s_ui_page == UI_PAGE_KKF_MOTOR_PID)
+        {
+            kkf_motor_pid_draw();
+        }
+        else if (s_ui_page == UI_PAGE_KKF_RC_YAW_CFG)
+        {
+            kkf_rc_yaw_cfg_draw();
         }
 
         else if (s_ui_page == UI_PAGE_KKF_GPS_ROUTE)
@@ -1558,6 +1906,8 @@ void Menu_Select(void)
             uint8 ok3;
             uint8 ok4;
             uint8 ok5;
+            uint8 ok6;
+            uint8 ok7;
             k13_latched = 1u;
 
             ok1 = flash_storage_save_pid_mode_cfg();
@@ -1569,9 +1919,11 @@ void Menu_Select(void)
             flash_storage_save_kemu1_cfg();
             flash_storage_save_slope_cfg();
             flash_storage_save_kemu3_seg();
+            ok6 = flash_storage_save_misc_cfg();
+            ok7 = ttop_rc_yaw_record_save_to_flash();
             
             // 轻量提示：显示 SAVE OK/FAIL
-            if (ok1 && ok2 && ok3 && ok4 && ok5)
+            if (ok1 && ok2 && ok3 && ok4 && ok5 && ok6 && ok7)
             {
                 ips200_show_string(16 * 8, 0, "SAVE OK");
             }
@@ -1643,6 +1995,12 @@ void Menu_Select(void)
     uint8 slope_edit_page =
         (uint8)(s_ui_page == UI_PAGE_KKF_SLOPE_DBG &&
                 (s_kkf_slope_state == KKF_SLOPE_STATE_EDIT));
+    uint8 motor_pid_edit_page =
+        (uint8)(s_ui_page == UI_PAGE_KKF_MOTOR_PID &&
+                (s_kkf_motor_pid_state == KKF_MOTOR_PID_STATE_EDIT));
+    uint8 spch_edit_page =
+        (uint8)(s_ui_page == UI_PAGE_KKF_SPCH_DBG &&
+                (s_kkf_spch_state == KKF_SPCH_STATE_EDIT));
     uint8 k1_long_evt = 0u;
     uint8 k3_long_evt = 0u;
 
@@ -1667,6 +2025,16 @@ void Menu_Select(void)
         k3_long_evt = Key_ReadLongPress(KEY_ID_3);
     }
     else if (slope_edit_page)
+    {
+        k1_long_evt = Key_ReadLongPress(KEY_ID_1);
+        k3_long_evt = Key_ReadLongPress(KEY_ID_3);
+    }
+    else if (motor_pid_edit_page)
+    {
+        k1_long_evt = Key_ReadLongPress(KEY_ID_1);
+        k3_long_evt = Key_ReadLongPress(KEY_ID_3);
+    }
+    else if (spch_edit_page)
     {
         k1_long_evt = Key_ReadLongPress(KEY_ID_1);
         k3_long_evt = Key_ReadLongPress(KEY_ID_3);
@@ -1931,16 +2299,16 @@ void Menu_Select(void)
         }
         else if (s_ui_page == UI_PAGE_KKF_PARAM)
         {
-            // 1:MODE_SEL 2:EIGHT_TURN 3:E8_PROG 4:PID_CHANGE 5:PID_MODE 6:CON_DBG 7:DYN_PID 8:KEY_DBG 9:SPCH_DBG 10:KEMU1_DBG 11:KEMU3_DBG
+            // 1:MODE_SEL 2:EIGHT_TURN 3:E8_PROG 4:PID_CHANGE 5:PID_MODE 6:CON_DBG 7:DYN_PID 8:KEY_DBG 9:SPCH_DBG 10:KEMU1_DBG 11:KEMU3_DBG 12:MOTOR_PID 13:RC_YAW_CFG
             if (KEY3_PRES == key)
             {
                 if (s_kkf_param_item > 1u) s_kkf_param_item--;
-                else s_kkf_param_item = 11u;
+                else s_kkf_param_item = 13u;
                 ips200_clear();
             }
             else if (KEY1_PRES == key)
             {
-                if (s_kkf_param_item < 11u) s_kkf_param_item++;
+                if (s_kkf_param_item < 13u) s_kkf_param_item++;
                 else s_kkf_param_item = 1u;
                 ips200_clear();
             }
@@ -2022,6 +2390,20 @@ void Menu_Select(void)
                     s_kkf_kemu3_menu_item = 1u;
                     ips200_clear();
                 }
+                else if (s_kkf_param_item == 12u)
+                {
+                    s_ui_page = UI_PAGE_KKF_MOTOR_PID;
+                    s_kkf_motor_pid_item = 1u;
+                    s_kkf_motor_pid_state = KKF_MOTOR_PID_STATE_SEL;
+                    ips200_clear();
+                }
+                else if (s_kkf_param_item == 13u)
+                {
+                    s_ui_page = UI_PAGE_KKF_RC_YAW_CFG;
+                    s_kkf_rc_yaw_cfg_item = 1u;
+                    s_kkf_rc_yaw_cfg_edit = 0u;
+                    ips200_clear();
+                }
                 else
                 {
                     ips200_clear();
@@ -2031,6 +2413,63 @@ void Menu_Select(void)
             {
                 s_ui_page = UI_PAGE_KKF_MAIN;
                 ips200_clear();
+            }
+        }
+        else if (s_ui_page == UI_PAGE_KKF_RC_YAW_CFG)
+        {
+            // MODE3 RC yaw 配置页：
+            // 1:YAW_ONLY 2:RECORD 3:REPLAY
+            // 选择态：KEY1/KEY3 移动，KEY2 进编辑，KEY4 返回
+            // 编辑态：KEY1/KEY3 切 ON/OFF，KEY2 回选择态
+            if (KEY4_PRES == key)
+            {
+                s_ui_page = UI_PAGE_KKF_PARAM;
+                s_kkf_rc_yaw_cfg_edit = 0u;
+                ips200_clear();
+            }
+            else if (!s_kkf_rc_yaw_cfg_edit)
+            {
+                if (KEY3_PRES == key)
+                {
+                    if (s_kkf_rc_yaw_cfg_item > 1u) s_kkf_rc_yaw_cfg_item--;
+                    else s_kkf_rc_yaw_cfg_item = 3u;
+                    ips200_clear();
+                }
+                else if (KEY1_PRES == key)
+                {
+                    if (s_kkf_rc_yaw_cfg_item < 3u) s_kkf_rc_yaw_cfg_item++;
+                    else s_kkf_rc_yaw_cfg_item = 1u;
+                    ips200_clear();
+                }
+                else if (KEY2_PRES == key)
+                {
+                    s_kkf_rc_yaw_cfg_edit = 1u;
+                    ips200_clear();
+                }
+            }
+            else
+            {
+                if (KEY1_PRES == key || KEY3_PRES == key)
+                {
+                    if (s_kkf_rc_yaw_cfg_item == 1u)
+                    {
+                        s_mode3_cfg_yaw_only = (uint8)(!s_mode3_cfg_yaw_only);
+                    }
+                    else if (s_kkf_rc_yaw_cfg_item == 2u)
+                    {
+                        s_mode3_cfg_record = (uint8)(!s_mode3_cfg_record);
+                    }
+                    else
+                    {
+                        s_mode3_cfg_replay = (uint8)(!s_mode3_cfg_replay);
+                    }
+                    ips200_clear();
+                }
+                else if (KEY2_PRES == key)
+                {
+                    s_kkf_rc_yaw_cfg_edit = 0u;
+                    ips200_clear();
+                }
             }
         }
         else if (s_ui_page == UI_PAGE_KKF_EIGHT_TURN)
@@ -2265,30 +2704,32 @@ void Menu_Select(void)
             }
             else
             {
-                if (KEY1_PRES == key)
+                if (k1_long_evt && k1_now)
                 {
-                    if (s_kkf_spch_item == KKF_SPCH_FIELD_FIT_MODE)
+                    uint8 i;
+                    for (i = 0u; i < KKF_SPCH_LONG_PRESS_EXTRA_STEPS; i++)
                     {
-                        if (g_ttop_speed_change_fit_mode > 0u) g_ttop_speed_change_fit_mode--;
+                        kkf_spch_adjust_value((kkf_spch_field_t)s_kkf_spch_item, -1);
                     }
-                    else
+                    ips200_clear();
+                }
+                else if (k3_long_evt && k3_now)
+                {
+                    uint8 i;
+                    for (i = 0u; i < KKF_SPCH_LONG_PRESS_EXTRA_STEPS; i++)
                     {
-                        g_ttop_speed_change_lpf_alpha -= 0.01f;
-                        if (g_ttop_speed_change_lpf_alpha < 0.0f) g_ttop_speed_change_lpf_alpha = 0.0f;
+                        kkf_spch_adjust_value((kkf_spch_field_t)s_kkf_spch_item, 1);
                     }
+                    ips200_clear();
+                }
+                else if (KEY1_PRES == key)
+                {
+                    kkf_spch_adjust_value((kkf_spch_field_t)s_kkf_spch_item, -1);
                     ips200_clear();
                 }
                 else if (KEY3_PRES == key)
                 {
-                    if (s_kkf_spch_item == KKF_SPCH_FIELD_FIT_MODE)
-                    {
-                        if (g_ttop_speed_change_fit_mode < 2u) g_ttop_speed_change_fit_mode++;
-                    }
-                    else
-                    {
-                        g_ttop_speed_change_lpf_alpha += 0.01f;
-                        if (g_ttop_speed_change_lpf_alpha > 1.0f) g_ttop_speed_change_lpf_alpha = 1.0f;
-                    }
+                    kkf_spch_adjust_value((kkf_spch_field_t)s_kkf_spch_item, 1);
                     ips200_clear();
                 }
                 else if (KEY2_PRES == key)
@@ -2881,6 +3322,71 @@ void Menu_Select(void)
                 else if (KEY2_PRES == key)
                 {
                     s_kkf_slope_state = KKF_SLOPE_STATE_SEL;
+                    ips200_clear();
+                }
+            }
+        }
+        else if (s_ui_page == UI_PAGE_KKF_MOTOR_PID)
+        {
+            if (KEY4_PRES == key)
+            {
+                s_ui_page = UI_PAGE_KKF_PARAM;
+                s_kkf_motor_pid_state = KKF_MOTOR_PID_STATE_SEL;
+                ips200_clear();
+            }
+            else if (s_kkf_motor_pid_state == KKF_MOTOR_PID_STATE_SEL)
+            {
+                if (KEY3_PRES == key)
+                {
+                    if (s_kkf_motor_pid_item > 1u) s_kkf_motor_pid_item--;
+                    else s_kkf_motor_pid_item = (uint8)KKF_MOTOR_PID_FIELD_COUNT;
+                    ips200_clear();
+                }
+                else if (KEY1_PRES == key)
+                {
+                    if (s_kkf_motor_pid_item < (uint8)KKF_MOTOR_PID_FIELD_COUNT) s_kkf_motor_pid_item++;
+                    else s_kkf_motor_pid_item = 1u;
+                    ips200_clear();
+                }
+                else if (KEY2_PRES == key)
+                {
+                    s_kkf_motor_pid_state = KKF_MOTOR_PID_STATE_EDIT;
+                    ips200_clear();
+                }
+            }
+            else
+            {
+                if (k1_long_evt && k1_now)
+                {
+                    uint8 i;
+                    for (i = 0u; i < KKF_PID_LONG_PRESS_EXTRA_STEPS; i++)
+                    {
+                        kkf_motor_pid_adjust_value((kkf_motor_pid_field_t)s_kkf_motor_pid_item, -1);
+                    }
+                    ips200_clear();
+                }
+                else if (k3_long_evt && k3_now)
+                {
+                    uint8 i;
+                    for (i = 0u; i < KKF_PID_LONG_PRESS_EXTRA_STEPS; i++)
+                    {
+                        kkf_motor_pid_adjust_value((kkf_motor_pid_field_t)s_kkf_motor_pid_item, +1);
+                    }
+                    ips200_clear();
+                }
+                else if (KEY1_PRES == key)
+                {
+                    kkf_motor_pid_adjust_value((kkf_motor_pid_field_t)s_kkf_motor_pid_item, -1);
+                    ips200_clear();
+                }
+                else if (KEY3_PRES == key)
+                {
+                    kkf_motor_pid_adjust_value((kkf_motor_pid_field_t)s_kkf_motor_pid_item, +1);
+                    ips200_clear();
+                }
+                else if (KEY2_PRES == key)
+                {
+                    s_kkf_motor_pid_state = KKF_MOTOR_PID_STATE_SEL;
                     ips200_clear();
                 }
             }

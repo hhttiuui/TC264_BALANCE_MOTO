@@ -12,12 +12,31 @@
 #include "zf_common_headfile.h"
 #include "ttop_rc_control.h"
 #include "Menu.h"
+#include "flash_storage.h"
 
 static ttop_rc_control_cfg_t s_rc_cfg;
 static float s_rc_speed_target_out = 0.0f;
 static unsigned char s_rc_ch4_reset_latched = 0u;
 static unsigned char s_rc_ch4_start_latched = 0u;
 static unsigned char s_rc_emergency_active = 0u;
+
+// ============================ RC Yaw 录制/回放（50ms采样） ============================
+#ifndef TTOP_RC_YAW_SAMPLE_TICKS_5MS
+#define TTOP_RC_YAW_SAMPLE_TICKS_5MS   (10u) // 10 * 5ms = 50ms
+#endif
+
+#ifndef TTOP_RC_YAW_RECORD_MAX_POINTS
+#define TTOP_RC_YAW_RECORD_MAX_POINTS  (1800u) // 1800 * 50ms = 90s（Flash 双页存储）
+#endif
+
+static float s_rc_yaw_record_buf[TTOP_RC_YAW_RECORD_MAX_POINTS];
+static uint16 s_rc_yaw_record_count = 0u;
+static uint16 s_rc_yaw_record_tick_5ms = 0u;
+static uint8 s_rc_yaw_record_active = 0u;
+
+static uint16 s_rc_yaw_replay_index = 0u;
+static uint16 s_rc_yaw_replay_tick_5ms = 0u;
+static uint8 s_rc_yaw_replay_active = 0u;
 
 #ifndef TTOP_RC_SPEED_SLEW_COUNTS_PER_5MS
 #define TTOP_RC_SPEED_SLEW_COUNTS_PER_5MS   (3.0f)  //1f锛氭煍鍜岋紝鍝嶅簲閫熷害鎱�  2~3f锛氶�備腑锛屽搷搴旈�熷害閫備腑  4~5f锛氬揩閫燂紝鍝嶅簲閫熷害蹇紝绋冲畾鎬у樊
@@ -126,6 +145,9 @@ void ttop_rc_control_init(void)
     s_rc_cfg.speed.sensitivity = 1.0f;
 
     s_rc_speed_target_out = 0.0f;
+
+    // 上电尝试加载上次保存的 yaw 轨迹（失败不影响运行）
+    (void)ttop_rc_yaw_record_load_from_flash();
 }
 
 void ttop_rc_control_set_config(const ttop_rc_control_cfg_t *cfg)
@@ -271,4 +293,178 @@ void ttop_rc_control_speed_only_task_5ms(void)
     }
 
     uart_receiver.finsh_flag = 0u;
+}
+
+void ttop_rc_control_yaw_only_task_5ms(void)
+{
+    // MODE3 运行开关：未开启时直接返回
+    if (!menu_mode3_run_yaw_only_enabled()) return;
+    // 回放开启时，避免与回放同时改写 g_yaw_target_deg
+    if (menu_mode3_run_replay_enabled()) return;
+
+    // 仅做方向（yaw）控制：保留与 ttop_rc_control_task_5ms 相同的 CH0 映射与速率限制。
+    if (uart_receiver.finsh_flag == 0u) return;
+    if (uart_receiver.state == 0u)
+    {
+        uart_receiver.finsh_flag = 0u;
+        return;
+    }
+
+    // CH4 急停态下，持续屏蔽本周期方向输出。
+    if (s_rc_emergency_active)
+    {
+        uart_receiver.finsh_flag = 0u;
+        return;
+    }
+
+    {
+        float yaw_unit_cmd = ttop_rc_map_ch0_to_unit_cmd((float)uart_receiver.channel[0]);
+        float yaw_rate_lim = s_rc_cfg.yaw_rate_limit_deg_per_5ms;
+
+        if (yaw_rate_lim < 0.0f) yaw_rate_lim = -yaw_rate_lim;
+
+        // 低速转向衰减：根据当前速度目标降低舵量
+        float current_speed_abs = s_rc_speed_target_out;
+        if (current_speed_abs < 0) current_speed_abs = -current_speed_abs;
+
+        float yaw_attenuation = 1.0f;
+        if (current_speed_abs < ((float)TTOP_RC_LOW_SPEED_RUN_COUNTS_PER_5MS * 0.4f))
+        {
+            yaw_attenuation = 0.2f;
+        }
+        else if (current_speed_abs < (float)TTOP_RC_LOW_SPEED_RUN_COUNTS_PER_5MS)
+        {
+            yaw_attenuation = 0.5f;
+        }
+
+        g_yaw_target_deg -= yaw_unit_cmd * yaw_rate_lim * yaw_attenuation;
+    }
+
+    uart_receiver.finsh_flag = 0u;
+}
+
+void ttop_rc_yaw_record_start(void)
+{
+    s_rc_yaw_record_active = 1u;
+    s_rc_yaw_replay_active = 0u;
+    s_rc_yaw_record_tick_5ms = 0u;
+    s_rc_yaw_record_count = 0u;
+
+    // 记录起始点
+    s_rc_yaw_record_buf[s_rc_yaw_record_count++] = g_yaw_target_deg;
+}
+
+void ttop_rc_yaw_record_stop(void)
+{
+    s_rc_yaw_record_active = 0u;
+}
+
+void ttop_rc_yaw_record_task_5ms(void)
+{
+    // MODE3 运行开关：未开启时直接返回
+    if (!menu_mode3_run_record_enabled()) return;
+
+    if (!s_rc_yaw_record_active) return;
+    if (s_rc_yaw_record_count >= (uint16)TTOP_RC_YAW_RECORD_MAX_POINTS)
+    {
+        s_rc_yaw_record_active = 0u;
+        return;
+    }
+
+    s_rc_yaw_record_tick_5ms++;
+    if (s_rc_yaw_record_tick_5ms >= (uint16)TTOP_RC_YAW_SAMPLE_TICKS_5MS)
+    {
+        s_rc_yaw_record_tick_5ms = 0u;
+        s_rc_yaw_record_buf[s_rc_yaw_record_count++] = g_yaw_target_deg;
+    }
+}
+
+void ttop_rc_yaw_replay_start(void)
+{
+    if (s_rc_yaw_record_count == 0u)
+    {
+        s_rc_yaw_replay_active = 0u;
+        return;
+    }
+
+    s_rc_yaw_record_active = 0u;
+    s_rc_yaw_replay_active = 1u;
+    s_rc_yaw_replay_tick_5ms = 0u;
+    s_rc_yaw_replay_index = 0u;
+
+    // 回放起点立即生效
+    g_yaw_target_deg = s_rc_yaw_record_buf[0u];
+    s_rc_yaw_replay_index = 1u;
+}
+
+void ttop_rc_yaw_replay_stop(void)
+{
+    s_rc_yaw_replay_active = 0u;
+}
+
+void ttop_rc_yaw_replay_task_5ms(void)
+{
+    // MODE3 运行开关：未开启时直接返回
+    if (!menu_mode3_run_replay_enabled()) return;
+
+    if (!s_rc_yaw_replay_active) return;
+    if (s_rc_yaw_replay_index >= s_rc_yaw_record_count)
+    {
+        s_rc_yaw_replay_active = 0u;
+        return;
+    }
+
+    s_rc_yaw_replay_tick_5ms++;
+    if (s_rc_yaw_replay_tick_5ms >= (uint16)TTOP_RC_YAW_SAMPLE_TICKS_5MS)
+    {
+        s_rc_yaw_replay_tick_5ms = 0u;
+        g_yaw_target_deg = s_rc_yaw_record_buf[s_rc_yaw_replay_index++];
+    }
+}
+
+uint8 ttop_rc_yaw_record_save_to_flash(void)
+{
+    return flash_storage_save_rc_yaw_record(
+        (const float *)s_rc_yaw_record_buf,
+        s_rc_yaw_record_count);
+}
+
+uint8 ttop_rc_yaw_record_load_from_flash(void)
+{
+    uint16 count = 0u;
+    if (!flash_storage_load_rc_yaw_record(
+            (float *)s_rc_yaw_record_buf,
+            (uint16)TTOP_RC_YAW_RECORD_MAX_POINTS,
+            &count))
+    {
+        return 0u;
+    }
+
+    s_rc_yaw_record_count = count;
+    s_rc_yaw_record_active = 0u;
+    s_rc_yaw_replay_active = 0u;
+    s_rc_yaw_record_tick_5ms = 0u;
+    s_rc_yaw_replay_tick_5ms = 0u;
+    s_rc_yaw_replay_index = 0u;
+    return 1u;
+}
+
+uint8 ttop_rc_yaw_record_is_active(void)
+{
+    return s_rc_yaw_record_active;
+}
+
+uint8 ttop_rc_yaw_replay_is_active(void)
+{
+    return s_rc_yaw_replay_active;
+}
+
+uint16 ttop_rc_yaw_record_get_count(void)
+{
+    return s_rc_yaw_record_count;
+}
+
+uint16 ttop_rc_yaw_replay_get_index(void)
+{
+    return s_rc_yaw_replay_index;
 }

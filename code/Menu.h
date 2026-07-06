@@ -20,6 +20,11 @@ void Menu_Select(void);
 void Menu_StartAll(void);
 void Menu_ResetAll(void);
 
+// MODE3（RC Yaw）运行态开关：由菜单配置并在 START 时锁存
+uint8 menu_mode3_run_yaw_only_enabled(void);
+uint8 menu_mode3_run_record_enabled(void);
+uint8 menu_mode3_run_replay_enabled(void);
+
 extern float ips_show_pid_out;
 
 extern float show_roll_deg;

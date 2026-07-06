@@ -20,10 +20,12 @@
 #include "zf_common_headfile.h"
 #include "flash_storage.h"
 
-#include "common_flie.h"      // s_pid_mode_cfg
-#include "top_8_turn_2.h"     // g_eight2_prog
+#include "common_flie.h"      // s_pid_mode_cfg, g_pitch_zero_offset_deg, g_yaw_zero_offset_deg
+#include "top_8_turn_2.h"     // g_eight2_prog, ttop_eight2_seg_t
 #include "ttop_kemu1.h"       // g_ttop_kemu1_*
-#include "ttop_kemu3.h"       // g_ttop_kemu3_seg_table
+#include "ttop_kemu3.h"       // g_ttop_kemu3_seg_table, g_ttop_kemu3_* (extras)
+#include "ttop_speed_change.h"// g_ttop_speed_change_fit_mode, g_ttop_speed_change_lpf_alpha
+#include "motor_controller.h" // motor_get_pid_gains, motor_set_pid_gains, etc.
 #include "roll_slope_speed.h" // roll_slope_speed_cfg_t
 #include "ins_path_follow.h"  // g_ins_path, g_ins_path_count, ins_waypoint_t
 #include "zf_driver_flash.h"
@@ -92,6 +94,17 @@
 #define FLASH_STORAGE_PAGE_KEMU3    (6u)
 #endif
 
+// RC Yaw 录制轨迹存储位置（固定使用第 2 页）
+#ifndef FLASH_STORAGE_SECTOR_RC_YAW
+#define FLASH_STORAGE_SECTOR_RC_YAW (0u)
+#endif
+#ifndef FLASH_STORAGE_PAGE_RC_YAW
+#define FLASH_STORAGE_PAGE_RC_YAW   (2u)
+#endif
+#ifndef FLASH_STORAGE_PAGE_RC_YAW_EX
+#define FLASH_STORAGE_PAGE_RC_YAW_EX (4u)
+#endif
+
 typedef struct
 {
 	uint32 magic;
@@ -108,6 +121,10 @@ typedef struct
 #define FLASH_STORAGE_MAGIC_INS     (0x494E5350u) // 'INSP' (INS Path)
 #define FLASH_STORAGE_MAGIC_SLOPE   (0x534C5043u) // 'SLPC'
 #define FLASH_STORAGE_MAGIC_KEMU3   (0x4B4D5533u) // 'KMU3'
+#define FLASH_STORAGE_MAGIC_MISC    (0x4D495343u) // 'MISC'
+#define FLASH_STORAGE_MAGIC_RC_YAW  (0x52594346u) // 'RYCF'
+#define FLASH_STORAGE_MAGIC_RC_YAW_P0 (0x52594330u) // 'RYC0'
+#define FLASH_STORAGE_MAGIC_RC_YAW_P1 (0x52594331u) // 'RYC1'
 #define FLASH_STORAGE_VERSION       (1u)
 
 // Header 按 uint32 槽位存储：magic/version+len（打包）/crc
@@ -354,6 +371,149 @@ typedef struct
 	ttop_kemu1_seg_t seg_table[TTOP_KEMU1_SEG_COUNT];
 } flash_kemu1_cfg_t;
 
+typedef struct
+{
+	uint16 count;
+	uint16 _pad;
+	float yaw_points[900];
+} flash_rc_yaw_cfg_t;
+
+typedef struct
+{
+	uint16 total_count;
+	uint16 part_count;
+	float yaw_points[900];
+} flash_rc_yaw_part_t;
+
+static flash_rc_yaw_cfg_t s_flash_rc_yaw_cfg;
+static flash_rc_yaw_part_t s_flash_rc_yaw_part0;
+static flash_rc_yaw_part_t s_flash_rc_yaw_part1;
+
+uint8 flash_storage_save_rc_yaw_record(const float *yaw_points, uint16 count)
+{
+	if ((yaw_points == NULL) || (count == 0u) || (count > (uint16)1800u))
+	{
+		return 0u;
+	}
+
+	{
+		uint16 count0 = (count > (uint16)900u) ? (uint16)900u : count;
+		uint16 count1 = (uint16)(count - count0);
+
+		memset((void *)&s_flash_rc_yaw_part0, 0, sizeof(s_flash_rc_yaw_part0));
+		s_flash_rc_yaw_part0.total_count = count;
+		s_flash_rc_yaw_part0.part_count = count0;
+		memcpy((void *)s_flash_rc_yaw_part0.yaw_points, (const void *)yaw_points, (size_t)count0 * sizeof(float));
+
+		if (!flash_storage_write_blob(
+				FLASH_STORAGE_SECTOR_RC_YAW,
+				FLASH_STORAGE_PAGE_RC_YAW,
+				FLASH_STORAGE_MAGIC_RC_YAW_P0,
+				(const void *)&s_flash_rc_yaw_part0,
+				(uint16)sizeof(s_flash_rc_yaw_part0)))
+		{
+			return 0u;
+		}
+
+		memset((void *)&s_flash_rc_yaw_part1, 0, sizeof(s_flash_rc_yaw_part1));
+		s_flash_rc_yaw_part1.total_count = count;
+		s_flash_rc_yaw_part1.part_count = count1;
+		if (count1 > 0u)
+		{
+			memcpy((void *)s_flash_rc_yaw_part1.yaw_points,
+			       (const void *)(yaw_points + count0),
+			       (size_t)count1 * sizeof(float));
+		}
+
+		return flash_storage_write_blob(
+			FLASH_STORAGE_SECTOR_RC_YAW,
+			FLASH_STORAGE_PAGE_RC_YAW_EX,
+			FLASH_STORAGE_MAGIC_RC_YAW_P1,
+			(const void *)&s_flash_rc_yaw_part1,
+			(uint16)sizeof(s_flash_rc_yaw_part1));
+	}
+}
+
+uint8 flash_storage_load_rc_yaw_record(float *yaw_points, uint16 max_points, uint16 *out_count)
+{
+	if ((yaw_points == NULL) || (out_count == NULL) || (max_points == 0u))
+	{
+		return 0u;
+	}
+
+	// 新格式：两页（最多 1800 点）
+	if (flash_storage_read_blob(
+			FLASH_STORAGE_SECTOR_RC_YAW,
+			FLASH_STORAGE_PAGE_RC_YAW,
+			FLASH_STORAGE_MAGIC_RC_YAW_P0,
+			(void *)&s_flash_rc_yaw_part0,
+			(uint16)sizeof(s_flash_rc_yaw_part0)))
+	{
+		uint16 total = s_flash_rc_yaw_part0.total_count;
+		uint16 count0 = s_flash_rc_yaw_part0.part_count;
+		uint16 count1;
+
+		if ((total == 0u) || (total > (uint16)1800u)) return 0u;
+		if ((count0 == 0u) || (count0 > (uint16)900u) || (count0 > total)) return 0u;
+		if (total > max_points) return 0u;
+
+		count1 = (uint16)(total - count0);
+		if (count1 > (uint16)900u) return 0u;
+
+		memcpy((void *)yaw_points,
+		       (const void *)s_flash_rc_yaw_part0.yaw_points,
+		       (size_t)count0 * sizeof(float));
+
+		if (count1 > 0u)
+		{
+			if (!flash_storage_read_blob(
+					FLASH_STORAGE_SECTOR_RC_YAW,
+					FLASH_STORAGE_PAGE_RC_YAW_EX,
+					FLASH_STORAGE_MAGIC_RC_YAW_P1,
+					(void *)&s_flash_rc_yaw_part1,
+					(uint16)sizeof(s_flash_rc_yaw_part1)))
+			{
+				return 0u;
+			}
+
+			if (s_flash_rc_yaw_part1.total_count != total) return 0u;
+			if (s_flash_rc_yaw_part1.part_count != count1) return 0u;
+
+			memcpy((void *)(yaw_points + count0),
+			       (const void *)s_flash_rc_yaw_part1.yaw_points,
+			       (size_t)count1 * sizeof(float));
+		}
+
+		*out_count = total;
+		return 1u;
+	}
+
+	// 兼容旧格式：单页（最多 900 点）
+	if (!flash_storage_read_blob(
+			FLASH_STORAGE_SECTOR_RC_YAW,
+			FLASH_STORAGE_PAGE_RC_YAW,
+			FLASH_STORAGE_MAGIC_RC_YAW,
+			(void *)&s_flash_rc_yaw_cfg,
+			(uint16)sizeof(s_flash_rc_yaw_cfg)))
+	{
+		return 0u;
+	}
+
+	if ((s_flash_rc_yaw_cfg.count == 0u) || (s_flash_rc_yaw_cfg.count > (uint16)900u))
+	{
+		return 0u;
+	}
+
+	if (s_flash_rc_yaw_cfg.count > max_points)
+	{
+		return 0u;
+	}
+
+	memcpy((void *)yaw_points, (const void *)s_flash_rc_yaw_cfg.yaw_points, (size_t)s_flash_rc_yaw_cfg.count * sizeof(float));
+	*out_count = s_flash_rc_yaw_cfg.count;
+	return 1u;
+}
+
 uint8 flash_storage_save_kemu1_cfg(void)
 {
 	flash_kemu1_cfg_t cfg;
@@ -554,5 +714,88 @@ uint8 flash_storage_load_kemu3_seg(void)
 		return 0u;
 	}
 	memcpy((void *)g_ttop_kemu3_seg_table, (const void *)tmp, sizeof(tmp));
+	return 1u;
+}
+
+// ============================================================================
+// Flash 存储 —— 杂项配置（flash_misc_cfg_t）
+// ============================================================================
+
+uint8 flash_storage_save_misc_cfg(void)
+{
+	flash_misc_cfg_t cfg;
+
+	// ---- SPCH_DBG ----
+	cfg.fit_mode              = g_ttop_speed_change_fit_mode;
+	cfg.lpf_alpha             = g_ttop_speed_change_lpf_alpha;
+	cfg.pitch_angle_lpf_alpha = g_pitch_angle_lpf_alpha;
+	cfg.pitch_zero_offset_deg = g_pitch_zero_offset_deg;
+
+	// ---- KEMU3 额外参数 ----
+	cfg.ex2_loop_count           = g_ttop_kemu3_ex2_loop_count;
+	cfg.kemu3_end_target_rel_deg = g_ttop_kemu3_end_seg.target_rel_deg;
+	cfg.kemu3_end_rate_dps       = g_ttop_kemu3_end_seg.rate_dps;
+	cfg.yaw_zero_offset_deg      = g_yaw_zero_offset_deg;
+	cfg.kemu3_yaw_ki_path        = g_kemu3_yaw_ki_path;
+	cfg.kemu3_counts_per_meter   = g_ttop_kemu3_counts_per_meter;
+
+	// ---- MOTOR_PID ----
+	motor_get_pid_gains(&cfg.motor_kp, &cfg.motor_ki, &cfg.motor_kd);
+	motor_get_pitch_speed_boost_params(&cfg.motor_pitch_boost_threshold, &cfg.motor_pitch_boost_k);
+	cfg.motor_pitch_boost_max = motor_get_pitch_speed_boost_max_counts();
+	cfg.motor_pitch_boost_enable = motor_get_pitch_speed_boost_enable();
+
+	// reserved 填充 0（后续新增字段会覆盖对应位置）
+	memset((void *)cfg.reserved, 0, sizeof(cfg.reserved));
+	// _pad 字段在栈上默认未初始化，显式清零
+	cfg._pad0[0] = 0; cfg._pad0[1] = 0; cfg._pad0[2] = 0;
+	cfg._pad1[0] = 0; cfg._pad1[1] = 0; cfg._pad1[2] = 0;
+	cfg._pad2[0] = 0; cfg._pad2[1] = 0; cfg._pad2[2] = 0;
+
+	return flash_storage_write_blob(
+		FLASH_STORAGE_SECTOR_MISC,
+		FLASH_STORAGE_PAGE_MISC,
+		FLASH_STORAGE_MAGIC_MISC,
+		(const void *)&cfg,
+		(uint16)sizeof(flash_misc_cfg_t));
+}
+
+uint8 flash_storage_load_misc_cfg(void)
+{
+	flash_misc_cfg_t cfg;
+
+	if (!flash_storage_read_blob(
+			FLASH_STORAGE_SECTOR_MISC,
+			FLASH_STORAGE_PAGE_MISC,
+			FLASH_STORAGE_MAGIC_MISC,
+			(void *)&cfg,
+			(uint16)sizeof(flash_misc_cfg_t)))
+	{
+		return 0u;
+	}
+
+	// ---- SPCH_DBG ----
+	g_ttop_speed_change_fit_mode = cfg.fit_mode;
+	g_ttop_speed_change_lpf_alpha = cfg.lpf_alpha;
+	g_pitch_angle_lpf_alpha      = cfg.pitch_angle_lpf_alpha;
+	if (g_pitch_angle_lpf_alpha < 0.0f) g_pitch_angle_lpf_alpha = 0.0f;
+	if (g_pitch_angle_lpf_alpha > 0.99f) g_pitch_angle_lpf_alpha = 0.99f;
+	g_pitch_zero_offset_deg      = cfg.pitch_zero_offset_deg;
+
+	// ---- KEMU3 额外参数 ----
+	g_ttop_kemu3_ex2_loop_count           = cfg.ex2_loop_count;
+	g_ttop_kemu3_end_seg.target_rel_deg   = cfg.kemu3_end_target_rel_deg;
+	g_ttop_kemu3_end_seg.rate_dps         = cfg.kemu3_end_rate_dps;
+	g_yaw_zero_offset_deg                 = cfg.yaw_zero_offset_deg;
+	g_kemu3_yaw_ki_path                   = cfg.kemu3_yaw_ki_path;
+	g_ttop_kemu3_counts_per_meter         = cfg.kemu3_counts_per_meter;
+	ttop_kemu3_rebuild_targets();
+
+	// ---- MOTOR_PID ----
+	motor_set_pid_gains(cfg.motor_kp, cfg.motor_ki, cfg.motor_kd);
+	motor_set_pitch_speed_boost_params(cfg.motor_pitch_boost_threshold, cfg.motor_pitch_boost_k);
+	motor_set_pitch_speed_boost_max_counts(cfg.motor_pitch_boost_max);
+	motor_set_pitch_speed_boost_enable(cfg.motor_pitch_boost_enable);
+
 	return 1u;
 }

@@ -18,6 +18,10 @@ volatile uint8 pid_flag = 0;
 
 // yaw 零点偏置（度），后续可通过菜单修改并存入 Flash
 volatile float g_yaw_zero_offset_deg = 0.0f;
+// pitch 零点偏置（度），可在 SPCH_DBG 页面调节
+volatile float g_pitch_zero_offset_deg = 0.0f;
+// pitch 角度低通系数（0=关闭滤波，取值建议 0~0.99）
+volatile float g_pitch_angle_lpf_alpha = 0.0f;
 
 // PID/AHRS 调用周期（秒）：当前用5ms触发 
 #define PID_TASK_DT_S   (0.005f)
@@ -34,7 +38,7 @@ volatile float g_yaw_zero_offset_deg = 0.0f;
 
 // IMU/AHRS 调用周期（秒）：当前用2ms触发 
 #ifndef IMU_TASK_DT_S
-#define IMU_TASK_DT_S   (0.002f)
+#define IMU_TASK_DT_S   (0.001f)
 #endif
 
 volatile uint8 imu_flag_2ms = 0;
@@ -87,6 +91,8 @@ static volatile float g_pitch_deg_cache = 0.0f;
 static volatile float g_yaw_deg_cache = 0.0f;
 static volatile float g_yaw_rel_deg_cache = 0.0f;
 static volatile float g_pitch_rate_dps_f_cache = 0.0f;
+static float g_pitch_deg_lpf_state = 0.0f;
+static uint8 g_pitch_deg_lpf_inited = 0u;
 
 // 角速度死区（单位：deg/s，用于抑制零点附近噪声，建议0-2）
 #ifndef GYRO_RATE_DEADZONE_DPS
@@ -165,16 +171,6 @@ static void pid_set_limits(pid_t *pid, float out_min, float out_max)
 	pid->out_max = out_max;
 }
 
-void pid_reset(void)
-{
-	g_pid_angle.integrator = 0.0f;
-	g_pid_angle.prev_error = 0.0f;
-	g_pid_angle.prev_measurement = 0.0f;
-	g_pid_rate.integrator = 0.0f;
-	g_pid_rate.prev_error = 0.0f;
-	g_pid_rate.prev_measurement = 0.0f;
-}
-
 // PID 计算，输入测量值 measurement，时间间隔 dt（秒）
 static float pid_compute(pid_t *pid, float setpoint, float measurement, float dt)
 {
@@ -210,17 +206,6 @@ static float pid_compute(pid_t *pid, float setpoint, float measurement, float dt
 	return out;
 }
 
-// 默认的 IMU -> 舵机目标 映射函数（示例）
-// 将加速度 g 值线性映射到 0..180 度（仅示例，用户可在 main 中实现更复杂映射并赋值给 pid_target）
-float default_imu_to_target(float imu_g)
-{
-	// 假设 imu_g 在 -1.0 .. +1.0 范围，映射到 0..180
-	float t = (imu_g + 1.0f) * 0.5f; // 0..1
-	if (t < 0.0f) t = 0.0f;
-	if (t > 1.0f) t = 1.0f;
-	return t * 180.0f;
-}
-
 // =======IMU 周期任务处理函数：在 2ms 定时器中调用=======
 void imu_task_handler_2ms(void)
 {
@@ -239,17 +224,37 @@ void imu_task_handler_2ms(void)
 	// 角速度（deg/s）：按当前安装方向，暂时沿用 gyro_y，并保留你现有的符号约定
 	float pitch_rate_dps_f = -imu660rx_gyro_transition_filtered(imu660rx_gyro_y);
 	pitch_rate_dps_f = apply_deadzone(pitch_rate_dps_f, GYRO_RATE_DEADZONE_DPS);
+	float pitch_corr_deg = pitch_deg - g_pitch_zero_offset_deg;
+	float pitch_out_deg = pitch_corr_deg;
+
+	if (g_pitch_angle_lpf_alpha > 0.0f)
+	{
+		float a = g_pitch_angle_lpf_alpha;
+		if (a > 0.99f) a = 0.99f;
+		if (!g_pitch_deg_lpf_inited)
+		{
+			g_pitch_deg_lpf_state = pitch_corr_deg;
+			g_pitch_deg_lpf_inited = 1u;
+		}
+		g_pitch_deg_lpf_state = a * g_pitch_deg_lpf_state + (1.0f - a) * pitch_corr_deg;
+		pitch_out_deg = g_pitch_deg_lpf_state;
+	}
+	else
+	{
+		g_pitch_deg_lpf_state = pitch_corr_deg;
+		g_pitch_deg_lpf_inited = 0u;
+	}
 
 	// 写入缓存（PID 任务仅读取这些缓存）
 	g_roll_deg_cache = roll_deg;
-	g_pitch_deg_cache = pitch_deg;
+	g_pitch_deg_cache = pitch_out_deg;
 	g_yaw_deg_cache = yaw_deg;
 	g_yaw_rel_deg_cache = yaw_rel_deg;
 	g_pitch_rate_dps_f_cache = pitch_rate_dps_f;
 
 	// 兼容你现有的调试显示变量（如果 UI 侧在用）
 	show_roll_deg = roll_deg;
-	show_pitch_deg = pitch_deg;
+	show_pitch_deg = pitch_out_deg;
 	show_yaw_deg = yaw_rel_deg;
 	show_pitch_rate_dps_f = pitch_rate_dps_f;
 	gpio_toggle_level(P22_1);
@@ -485,17 +490,6 @@ void pid_dynamic_cascade_set_kp(float angle_kp, float rate_kp)
 	pid_set_gains(&g_pid_rate, rate_kp, g_pid_rate.ki, g_pid_rate.kd);
 }
 
-void pid_dynamic_set_ahrs_kp(float ahrs_kp)
-{
-	if (ahrs_kp < 0.0f) ahrs_kp = 0.0f;
-	s_pid_mode_cfg[(uint16)g_pid_active_mode].ahrs_kp = ahrs_kp;
-
-	ahrs_mahony_set_gains(&g_ahrs,
-						  s_pid_mode_cfg[(uint16)g_pid_active_mode].ahrs_kp,
-						  s_pid_mode_cfg[(uint16)g_pid_active_mode].ahrs_ki,
-						  0u);
-}
-
 static void pid_apply_gains(pid_t *pid, const pid_gains_cfg_t *cfg)
 {
 	pid_init_default(pid);
@@ -513,6 +507,26 @@ static void pid_apply_gains_hot(pid_t *pid, const pid_gains_cfg_t *cfg)
 	// 热切换时保留历史项，但把积分值夹到新的积分限幅内。
 	if (pid->integrator > pid->integrator_max) pid->integrator = pid->integrator_max;
 	if (pid->integrator < pid->integrator_min) pid->integrator = pid->integrator_min;
+}
+
+static void pid_clear_integrator_state(pid_t *pid)
+{
+	pid->integrator = 0.0f;
+	pid->prev_error = 0.0f;
+	pid->prev_measurement = 0.0f;
+}
+
+void PID_CLEAR_INTEGRATORS(void)
+{
+	pid_clear_integrator_state(&g_pid_yaw);
+	pid_clear_integrator_state(&g_pid_angle);
+	pid_clear_integrator_state(&g_pid_rate);
+	pid_clear_integrator_state(&g_pid_angle_two);
+
+	// 仅重置 Mahony 积分反馈项，姿态四元数保持不变。
+	g_ahrs.integralFBx = 0.0f;
+	g_ahrs.integralFBy = 0.0f;
+	g_ahrs.integralFBz = 0.0f;
 }
 
 void PID_INIT_BY_MODE(pid_mode_t mode)
@@ -626,57 +640,6 @@ static float pid_compute_yaw_target_with_gate_dt(const pid_mode_cfg_t *cfg, floa
 	return pid_compute(&g_pid_yaw, g_yaw_target_deg, yaw_rel_deg, yaw_dt_s);
 }
 
-void pid_timer_handler_by_mode(pid_mode_t mode)
-{
-	const pid_mode_cfg_t *cfg = pid_mode_cfg_get(mode);
-
-	float pitch_deg = (float)g_pitch_deg_cache;
-	float pitch_rate_dps_f = (float)g_pitch_rate_dps_f_cache;
-	float yaw_rel_deg = (float)g_yaw_rel_deg_cache;
-
-	// yaw PID -> pid_target
-	g_yaw_pid_out_deg = pid_compute_yaw_target_with_gate(cfg, pitch_deg, yaw_rel_deg);
-	pid_target = g_yaw_pid_out_deg;
-
-	float out = 0.0f;
-	if (cfg->strategy == PID_STRAT_CASCADE)//位置+角度+角速度
-	{
-		float rate_sp_dps = pid_compute(&g_pid_angle, pid_target, pitch_deg, PID_TASK_DT_S);
-		out = pid_compute(&g_pid_rate, rate_sp_dps, pitch_rate_dps_f, PID_TASK_DT_S);
-		out = apply_deadzone(out, SERVO_OUT_DEADZONE);
-	}
-	else if (cfg->strategy == PID_STRAT_ANGLE_ONLY)//位置+角度
-	{
-		// 这里与现有 pid_timer_handler_no_rate 保持一致：angle 用 g_pid_angle，setpoint=0
-		out = pid_compute(&g_pid_angle, 0.0f, pitch_deg, PID_TASK_DT_S);
-		out += (1.5f) * pitch_rate_dps_f;
-		out = apply_deadzone(out, SERVO_OUT_DEADZONE);
-	}
-	else//位置+角度-角速度
-	{
-		// 阻尼模式：angle 用 g_pid_angle_two，setpoint=pid_target
-		out = pid_compute(&g_pid_angle_two, pid_target, pitch_deg, PID_TASK_DT_S);
-
-		float damp_k = cfg->damp_k;
-		float damp_max = cfg->damp_max;
-
-		float damp = damp_k * pitch_rate_dps_f;
-		if (damp > damp_max) damp = damp_max;
-		if (damp < -damp_max) damp = -damp_max;
-		out += damp;
-
-	// 总输出再限幅（复用本 PID 的输出限幅）
-		if (out > g_pid_angle_two.out_max) out = g_pid_angle_two.out_max;
-		if (out < g_pid_angle_two.out_min) out = g_pid_angle_two.out_min;
-
-		out = apply_deadzone(out, SERVO_OUT_DEADZONE);
-	}
-
-	ips_show_pid_out = out;
-	servo_output_cb(out);
-	count_pid++;
-}
-
 void pid_timer_handler_dynamic_cascade(pid_mode_t mode)
 {
 	// 动态 PID 专用：固定 cascade 控制链，kp 可由外部实时插值更新。
@@ -701,7 +664,7 @@ void pid_timer_handler_dynamic_cascade(pid_mode_t mode)
 
 void pid_timer_handler_multirate_2ms(void)
 {
-	gpio_toggle_level(P22_1);
+	gpio_toggle_level(P22_2);
 	// 新框架：外部固定 2ms 调用本函数
 	// - 角速度环：每次调用执行（2ms）
 	// - 角度环：每 2 次执行（4ms）
@@ -787,5 +750,5 @@ void pid_timer_handler_multirate_2ms(void)
 	{
 		s_sched_cnt = 0u;
 	}
-	gpio_toggle_level(P22_1);
+	gpio_toggle_level(P22_2);
 }

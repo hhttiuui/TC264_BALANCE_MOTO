@@ -16,17 +16,7 @@
 // pos: 0~1000  ->  1000~2000us
 #define SERVO_PWM(pos)          ((uint32)(((uint64)PWM_DUTY_MAX * (SERVO_PULSE_MIN_US + (uint32)(pos))) / SERVO_PERIOD_US))
 
-
-void PID_INIT(void);
-void PID_INIT_NO_RATE(void);
-void PID_INIT_NO_RATE_TWO(void);
-void PID_INIT_NO_RATE_THREE(void);
-
 void imu_task_handler_2ms(void);
-void pid_timer_handler_10ms(void);
-void pid_timer_handler_10ms_no_rate(void);
-void pid_timer_handler_10ms_no_rate_two(void);
-void pid_timer_handler_10ms_no_rate_three(void);
 
 // ============================================================================
 // 统一 PID 模式（common_flie.c 末尾新增）
@@ -114,6 +104,11 @@ extern pid_mode_cfg_t s_pid_mode_cfg[PID_MODE_CFG_COUNT];
 // 按模式一次性初始化 PID/AHRS/滤波/初值等
 void PID_INIT_BY_MODE(pid_mode_t mode);
 
+// 仅清理运行时积分状态（不修改 kp/ki/kd 与限幅配置）
+// - 清零各 PID 实例的 integrator / prev_error / prev_measurement
+// - 清零 AHRS Mahony 的积分反馈项
+void PID_CLEAR_INTEGRATORS(void);
+
 // 按模式热切换参数（不清零 PID 历史项）
 // 说明：
 // - 仅更新增益/限幅与电机目标速度，不执行 PID 实例重置。
@@ -122,12 +117,6 @@ void PID_HOT_SWITCH_BY_MODE(pid_mode_t mode);
 
 // 动态 PID（cascade）参数接收接口：由外部传入实时 kp。
 void pid_dynamic_cascade_set_kp(float angle_kp, float rate_kp);
-
-// 运行时动态调整 Mahony kp（不重置姿态/四元数）。
-void pid_dynamic_set_ahrs_kp(float ahrs_kp);
-
-// 按模式周期执行 PID（函数名不包含周期，外部按实际调度频率调用即可）
-void pid_timer_handler_by_mode(pid_mode_t mode);
 
 // 动态 PID 专用处理：固定走 位置+角度+角速度（cascade）链路。
 // 适用于外部按速度实时插值 kp 的场景。
@@ -139,8 +128,6 @@ void pid_timer_handler_dynamic_cascade(pid_mode_t mode);
 // - yaw 外环：8ms
 void pid_timer_handler_multirate_2ms(void);
 
-float default_imu_to_target(float imu_g);
-
 // 舵机清零/回中：对外接口
 // 说明：本项目舵机输出使用 PWM_CH1 + SERVO_PWM(pos) 映射。
 // 这里的“清零”定义为输出回到 CENTER（与 common_flie.c 内部 servo_output_cb 的 CENTER=500 对齐）。
@@ -150,6 +137,8 @@ void servo_zero(void);
 extern volatile float g_yaw_pid_out_deg;
 extern volatile float g_yaw_target_deg;
 extern volatile float g_yaw_zero_offset_deg;  // yaw 零点偏置（度），菜单可调
+extern volatile float g_pitch_zero_offset_deg; // pitch 零点偏置（度），菜单可调
+extern volatile float g_pitch_angle_lpf_alpha; // pitch 角度低通系数（0=关闭滤波）
 extern int count_pid;
 
 #endif /* CODE_COMMON_FLIE_H_ */
