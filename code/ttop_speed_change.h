@@ -33,6 +33,7 @@ float ttop_speed_change_get_speed_abs_filt(void);
 float ttop_speed_change_get_speed_pred(void);
 float ttop_speed_change_get_angle_kp(void);
 float ttop_speed_change_get_rate_kp(void);
+float ttop_speed_change_get_yaw_kp(void);
 
 // 拟合方式选择（可被菜单修改）：0=1/v^2 映射，1=线性 y=kx+b
 extern volatile uint8 g_ttop_speed_change_fit_mode;

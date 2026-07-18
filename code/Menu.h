@@ -24,6 +24,10 @@ void Menu_ResetAll(void);
 uint8 menu_mode3_run_yaw_only_enabled(void);
 uint8 menu_mode3_run_record_enabled(void);
 uint8 menu_mode3_run_replay_enabled(void);
+uint8 menu_mode3_flash_slot(void);
+uint8 menu_kemu3_record_enabled(void);
+uint8 menu_kemu3_replay_enabled(void);
+uint8 menu_kemu3_flash_slot(void);
 
 extern float ips_show_pid_out;
 

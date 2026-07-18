@@ -39,6 +39,10 @@ typedef enum
 	PID_MODE_CASCADE_EX5 = 9,
 	PID_MODE_CASCADE_EX6 = 10,
 	PID_MODE_CASCADE_EX7 = 11,
+	PID_MODE_CASCADE_EX8 = 12,
+	PID_MODE_CASCADE_EX9 = 13,
+	PID_MODE_CASCADE_EX10 = 14,
+	PID_MODE_CASCADE_EX11 = 15,
 } pid_mode_t;
 
 // ============================================================================
@@ -97,7 +101,7 @@ typedef struct
 
 
 // 配置表条目数（与 pid_mode_t 的最后一个枚举值保持一致）
-#define PID_MODE_CFG_COUNT   (12u)
+#define PID_MODE_CFG_COUNT   (16u)
 
 extern pid_mode_cfg_t s_pid_mode_cfg[PID_MODE_CFG_COUNT];
 
@@ -116,7 +120,7 @@ void PID_CLEAR_INTEGRATORS(void);
 void PID_HOT_SWITCH_BY_MODE(pid_mode_t mode);
 
 // 动态 PID（cascade）参数接收接口：由外部传入实时 kp。
-void pid_dynamic_cascade_set_kp(float angle_kp, float rate_kp);
+void pid_dynamic_cascade_set_kp(float angle_kp, float rate_kp, float yaw_kp);
 
 // 动态 PID 专用处理：固定走 位置+角度+角速度（cascade）链路。
 // 适用于外部按速度实时插值 kp 的场景。
@@ -137,7 +141,8 @@ void servo_zero(void);
 extern volatile float g_yaw_pid_out_deg;
 extern volatile float g_yaw_target_deg;
 extern volatile float g_yaw_zero_offset_deg;  // yaw 零点偏置（度），菜单可调
-extern volatile float g_pitch_zero_offset_deg; // pitch 零点偏置（度），菜单可调
+extern volatile float g_pitch_zero_offset_deg;
+extern volatile float g_servo_zero_offset_deg; // pitch 零点偏置（度），菜单可调
 extern volatile float g_pitch_angle_lpf_alpha; // pitch 角度低通系数（0=关闭滤波）
 extern int count_pid;
 

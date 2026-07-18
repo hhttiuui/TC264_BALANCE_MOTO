@@ -8,7 +8,7 @@
  *
  *  当前持久化两类数据：
  *  - `s_pid_mode_cfg`  : PID/AHRS/阻尼等配置表
- *  - `g_eight2_prog`   : 八字绕行段表（12 段）
+ *  - KM3 page 11：掉头和 S 弯两段录制轨迹
  *
  *  设计要点：
  *  - 使用 zf_driver_flash 提供的“整页缓存 flash_union_buffer + 整页读写”接口。
@@ -21,7 +21,7 @@
 #include "flash_storage.h"
 
 #include "common_flie.h"      // s_pid_mode_cfg, g_pitch_zero_offset_deg, g_yaw_zero_offset_deg
-#include "top_8_turn_2.h"     // g_eight2_prog, ttop_eight2_seg_t
+#include "top_8_turn_2.h"     // g_eight2_prog, g_eight2_prog_ex1, g_eight2_prog_ex2
 #include "ttop_kemu1.h"       // g_ttop_kemu1_*
 #include "ttop_kemu3.h"       // g_ttop_kemu3_seg_table, g_ttop_kemu3_* (extras)
 #include "ttop_speed_change.h"// g_ttop_speed_change_fit_mode, g_ttop_speed_change_lpf_alpha
@@ -45,30 +45,11 @@
 #ifndef FLASH_STORAGE_SECTOR_EIGHT2
 #define FLASH_STORAGE_SECTOR_EIGHT2 (0u)
 #endif
-#ifndef FLASH_STORAGE_PAGE_EIGHT2
-#define FLASH_STORAGE_PAGE_EIGHT2   (11u)
+#ifndef FLASH_STORAGE_PAGE_KEMU3_RECORD
+#define FLASH_STORAGE_PAGE_KEMU3_RECORD   (11u)
 #endif
 
-#ifndef FLASH_STORAGE_SECTOR_EIGHT2_EX1
-#define FLASH_STORAGE_SECTOR_EIGHT2_EX1 (FLASH_STORAGE_SECTOR_EIGHT2)
-#endif
-#ifndef FLASH_STORAGE_PAGE_EIGHT2_EX1
-#define FLASH_STORAGE_PAGE_EIGHT2_EX1   (8u)
-#endif
-
-#ifndef FLASH_STORAGE_SECTOR_EIGHT2_EX2
-#define FLASH_STORAGE_SECTOR_EIGHT2_EX2 (FLASH_STORAGE_SECTOR_EIGHT2)
-#endif
-#ifndef FLASH_STORAGE_PAGE_EIGHT2_EX2
-#define FLASH_STORAGE_PAGE_EIGHT2_EX2   (9u)
-#endif
-
-#ifndef FLASH_STORAGE_SECTOR_KEMU1
-#define FLASH_STORAGE_SECTOR_KEMU1  (0u)
-#endif
-#ifndef FLASH_STORAGE_PAGE_KEMU1
-#define FLASH_STORAGE_PAGE_KEMU1    (7u)
-#endif
+// page 7 已释放（原 KMU1，现合并到 page 6 KALL）
 
 // 惯导航点表存储位置（使用 page 1，与其它数据分开）
 #ifndef FLASH_STORAGE_SECTOR_INS
@@ -114,17 +95,17 @@ typedef struct
 } flash_storage_hdr_t;
 
 #define FLASH_STORAGE_MAGIC_PID     (0x50494443u) // 'PIDC'
-#define FLASH_STORAGE_MAGIC_EIGHT2  (0x45383250u) // 'E82P'
-#define FLASH_STORAGE_MAGIC_EIGHT2_EX1 (0x45383231u) // 'E821'
-#define FLASH_STORAGE_MAGIC_EIGHT2_EX2 (0x45383232u) // 'E822'
-#define FLASH_STORAGE_MAGIC_KEMU1   (0x4B4D5531u) // 'KMU1'
+#define FLASH_STORAGE_MAGIC_KEMU3_RECORD (0x4B335243u) // 'K3RC'
+#define FLASH_STORAGE_MAGIC_KEMU_ALL (0x4B414C4Cu) // 'KALL'
 #define FLASH_STORAGE_MAGIC_INS     (0x494E5350u) // 'INSP' (INS Path)
 #define FLASH_STORAGE_MAGIC_SLOPE   (0x534C5043u) // 'SLPC'
-#define FLASH_STORAGE_MAGIC_KEMU3   (0x4B4D5533u) // 'KMU3'
+#define FLASH_STORAGE_MAGIC_KEMU1   (0x4B4D5531u) // 'KMU1' (deprecated, page 7 free)
 #define FLASH_STORAGE_MAGIC_MISC    (0x4D495343u) // 'MISC'
 #define FLASH_STORAGE_MAGIC_RC_YAW  (0x52594346u) // 'RYCF'
 #define FLASH_STORAGE_MAGIC_RC_YAW_P0 (0x52594330u) // 'RYC0'
 #define FLASH_STORAGE_MAGIC_RC_YAW_P1 (0x52594331u) // 'RYC1'
+#define FLASH_STORAGE_MAGIC_RC_YAW_SLOT2_P0 (0x52594333u) // 'RYC3'
+#define FLASH_STORAGE_MAGIC_RC_YAW_SLOT2_P1 (0x52594334u) // 'RYC4'
 #define FLASH_STORAGE_VERSION       (1u)
 
 // Header 按 uint32 槽位存储：magic/version+len（打包）/crc
@@ -255,6 +236,103 @@ static uint8 flash_storage_read_blob(uint32 sector, uint32 page, uint32 magic, v
 	return 1u;
 }
 
+typedef struct
+{
+	uint16 turn_count;
+	uint16 s_curve_count;
+	uint32 turn_crc;
+	uint32 s_curve_crc;
+	float points[900];
+} flash_kemu3_record_page_t;
+
+static flash_kemu3_record_page_t s_kemu3_record_page;
+
+static uint16 flash_storage_kemu3_slot_offset(uint8 slot)
+{
+	return (slot == 1u) ? 0u : 200u;
+}
+
+static uint16 flash_storage_kemu3_slot_capacity(uint8 slot)
+{
+	return (slot == 1u) ? 200u : 700u;
+}
+
+uint8 flash_storage_save_kemu3_record(uint8 slot, const float *points, uint16 count)
+{
+	uint16 offset;
+	uint16 capacity;
+
+	if ((slot < 1u) || (slot > 2u) || (points == NULL)) return 0u;
+	offset = flash_storage_kemu3_slot_offset(slot);
+	capacity = flash_storage_kemu3_slot_capacity(slot);
+	if ((count == 0u) || (count > capacity)) return 0u;
+
+	// 先读出整页，保留另一个区域；读失败时只建立一个空白页。
+	if (!flash_storage_read_blob(
+			FLASH_STORAGE_SECTOR_EIGHT2,
+			FLASH_STORAGE_PAGE_KEMU3_RECORD,
+			FLASH_STORAGE_MAGIC_KEMU3_RECORD,
+			(void *)&s_kemu3_record_page,
+			(uint16)sizeof(s_kemu3_record_page)))
+	{
+		memset((void *)&s_kemu3_record_page, 0, sizeof(s_kemu3_record_page));
+	}
+
+	memcpy((void *)&s_kemu3_record_page.points[offset], (const void *)points,
+	       (size_t)count * sizeof(float));
+	if (slot == 1u)
+	{
+		s_kemu3_record_page.turn_count = count;
+		s_kemu3_record_page.turn_crc = flash_storage_crc32(
+			(const void *)&s_kemu3_record_page.points[offset], (uint32)count * sizeof(float));
+	}
+	else
+	{
+		s_kemu3_record_page.s_curve_count = count;
+		s_kemu3_record_page.s_curve_crc = flash_storage_crc32(
+			(const void *)&s_kemu3_record_page.points[offset], (uint32)count * sizeof(float));
+	}
+
+	return flash_storage_write_blob(
+		FLASH_STORAGE_SECTOR_EIGHT2,
+		FLASH_STORAGE_PAGE_KEMU3_RECORD,
+		FLASH_STORAGE_MAGIC_KEMU3_RECORD,
+		(const void *)&s_kemu3_record_page,
+		(uint16)sizeof(s_kemu3_record_page));
+}
+
+uint8 flash_storage_load_kemu3_record(uint8 slot, float *points, uint16 max_points, uint16 *out_count)
+{
+	uint16 offset;
+	uint16 count;
+	uint32 expected_crc;
+	uint32 actual_crc;
+
+	if ((slot < 1u) || (slot > 2u) || (points == NULL) || (out_count == NULL)) return 0u;
+	if (!flash_storage_read_blob(
+			FLASH_STORAGE_SECTOR_EIGHT2,
+			FLASH_STORAGE_PAGE_KEMU3_RECORD,
+			FLASH_STORAGE_MAGIC_KEMU3_RECORD,
+			(void *)&s_kemu3_record_page,
+			(uint16)sizeof(s_kemu3_record_page)))
+	{
+		return 0u;
+	}
+
+	offset = flash_storage_kemu3_slot_offset(slot);
+	count = (slot == 1u) ? s_kemu3_record_page.turn_count : s_kemu3_record_page.s_curve_count;
+	expected_crc = (slot == 1u) ? s_kemu3_record_page.turn_crc : s_kemu3_record_page.s_curve_crc;
+	if ((count == 0u) || (count > flash_storage_kemu3_slot_capacity(slot)) || (count > max_points)) return 0u;
+	actual_crc = flash_storage_crc32(
+		(const void *)&s_kemu3_record_page.points[offset], (uint32)count * sizeof(float));
+	if (actual_crc != expected_crc) return 0u;
+
+	memcpy((void *)points, (const void *)&s_kemu3_record_page.points[offset],
+	       (size_t)count * sizeof(float));
+	*out_count = count;
+	return 1u;
+}
+
 uint8 flash_storage_save_pid_mode_cfg(void)
 {
 	return flash_storage_write_blob(
@@ -265,11 +343,13 @@ uint8 flash_storage_save_pid_mode_cfg(void)
 		(uint16)sizeof(s_pid_mode_cfg));
 }
 
+#define FLASH_STORAGE_PID_OLD_COUNT (12u)  // 旧固件的 PID 段数，用于向后兼容
+
 uint8 flash_storage_load_pid_mode_cfg(void)
 {
 	pid_mode_cfg_t tmp_new[PID_MODE_CFG_COUNT];
 
-	// 1) 先尝试按“新长度”读取（当前固件版本）
+	// 1) 先尝试按当前长度读取
 	if (flash_storage_read_blob(
 			FLASH_STORAGE_SECTOR_PID,
 			FLASH_STORAGE_PAGE_PID,
@@ -281,123 +361,95 @@ uint8 flash_storage_load_pid_mode_cfg(void)
 		return 1u;
 	}
 
+	// 2) 新长度不匹配，尝试按旧长度（12 组）读取，填充前面，新增的保留默认值
+	{
+		const uint16 old_sz = (uint16)(sizeof(pid_mode_cfg_t) * FLASH_STORAGE_PID_OLD_COUNT);
+		if (old_sz < (uint16)sizeof(tmp_new) &&
+		    flash_storage_read_blob(
+			    FLASH_STORAGE_SECTOR_PID,
+			    FLASH_STORAGE_PAGE_PID,
+			    FLASH_STORAGE_MAGIC_PID,
+			    (void *)tmp_new,
+			    old_sz))
+		{
+			memcpy((void *)s_pid_mode_cfg, (const void *)tmp_new, old_sz);
+			return 1u;
+		}
+	}
+
 	return 0u;
 }
 
-uint8 flash_storage_save_eight2_prog(void)
-{
-	return flash_storage_write_blob(
-		FLASH_STORAGE_SECTOR_EIGHT2,
-		FLASH_STORAGE_PAGE_EIGHT2,
-		FLASH_STORAGE_MAGIC_EIGHT2,
-		(const void *)g_eight2_prog,
-		(uint16)sizeof(g_eight2_prog));
-}
 
-uint8 flash_storage_load_eight2_prog(void)
-{
-	ttop_eight2_seg_t tmp[TTOP_EIGHT2_PROG_LEN];
-	if (!flash_storage_read_blob(
-			FLASH_STORAGE_SECTOR_EIGHT2,
-			FLASH_STORAGE_PAGE_EIGHT2,
-			FLASH_STORAGE_MAGIC_EIGHT2,
-			(void *)tmp,
-			(uint16)sizeof(tmp)))
-	{
-		return 0u;
-	}
-
-	memcpy((void *)g_eight2_prog, (const void *)tmp, sizeof(tmp));
-	return 1u;
-}
-
-uint8 flash_storage_save_eight2_prog_ex1(void)
-{
-	return flash_storage_write_blob(
-		FLASH_STORAGE_SECTOR_EIGHT2_EX1,
-		FLASH_STORAGE_PAGE_EIGHT2_EX1,
-		FLASH_STORAGE_MAGIC_EIGHT2_EX1,
-		(const void *)g_eight2_prog_ex1,
-		(uint16)sizeof(g_eight2_prog_ex1));
-}
-
-uint8 flash_storage_load_eight2_prog_ex1(void)
-{
-	ttop_eight2_seg_t tmp[TTOP_EIGHT2_PROG_LEN];
-	if (!flash_storage_read_blob(
-			FLASH_STORAGE_SECTOR_EIGHT2_EX1,
-			FLASH_STORAGE_PAGE_EIGHT2_EX1,
-			FLASH_STORAGE_MAGIC_EIGHT2_EX1,
-			(void *)tmp,
-			(uint16)sizeof(tmp)))
-	{
-		return 0u;
-	}
-
-	memcpy((void *)g_eight2_prog_ex1, (const void *)tmp, sizeof(tmp));
-	return 1u;
-}
-
-uint8 flash_storage_save_eight2_prog_ex2(void)
-{
-	return flash_storage_write_blob(
-		FLASH_STORAGE_SECTOR_EIGHT2_EX2,
-		FLASH_STORAGE_PAGE_EIGHT2_EX2,
-		FLASH_STORAGE_MAGIC_EIGHT2_EX2,
-		(const void *)g_eight2_prog_ex2,
-		(uint16)sizeof(g_eight2_prog_ex2));
-}
-
-uint8 flash_storage_load_eight2_prog_ex2(void)
-{
-	ttop_eight2_seg_t tmp[TTOP_EIGHT2_PROG_LEN];
-	if (!flash_storage_read_blob(
-			FLASH_STORAGE_SECTOR_EIGHT2_EX2,
-			FLASH_STORAGE_PAGE_EIGHT2_EX2,
-			FLASH_STORAGE_MAGIC_EIGHT2_EX2,
-			(void *)tmp,
-			(uint16)sizeof(tmp)))
-	{
-		return 0u;
-	}
-
-	memcpy((void *)g_eight2_prog_ex2, (const void *)tmp, sizeof(tmp));
-	return 1u;
-}
+// old flash_kemu1_cfg_t removed — merged into flash_kemu_all_cfg_t above
 
 typedef struct
 {
-	int32 counts_per_meter;
-	ttop_kemu1_seg_t seg_table[TTOP_KEMU1_SEG_COUNT];
-} flash_kemu1_cfg_t;
+	uint16 total_count;
+	uint16 part_count;
+	float yaw_points[900];  // 旧版 900 点（向后兼容读取）
+} flash_rc_yaw_part_old_t;
 
 typedef struct
 {
 	uint16 count;
 	uint16 _pad;
-	float yaw_points[900];
+	float yaw_points[900];  // 旧单页格式（向后兼容）
 } flash_rc_yaw_cfg_t;
 
 typedef struct
 {
 	uint16 total_count;
 	uint16 part_count;
-	float yaw_points[900];
+	float yaw_points[1019];  // 填满单页：4096-16-4=4076B, 4076/4=1019点
 } flash_rc_yaw_part_t;
 
 static flash_rc_yaw_cfg_t s_flash_rc_yaw_cfg;
 static flash_rc_yaw_part_t s_flash_rc_yaw_part0;
 static flash_rc_yaw_part_t s_flash_rc_yaw_part1;
+static flash_rc_yaw_part_old_t s_flash_rc_yaw_part0_old;
+static flash_rc_yaw_part_old_t s_flash_rc_yaw_part1_old;
 
-uint8 flash_storage_save_rc_yaw_record(const float *yaw_points, uint16 count)
+static uint8 flash_storage_get_rc_yaw_slot(uint8 slot,
+		uint32 *page0, uint32 *page1, uint32 *magic0, uint32 *magic1)
 {
-	if ((yaw_points == NULL) || (count == 0u) || (count > (uint16)1800u))
+	if (slot == 1u)
+	{
+		*page0 = FLASH_STORAGE_PAGE_RC_YAW;
+		*page1 = FLASH_STORAGE_PAGE_RC_YAW_EX;
+		*magic0 = FLASH_STORAGE_MAGIC_RC_YAW_P0;
+		*magic1 = FLASH_STORAGE_MAGIC_RC_YAW_P1;
+		return 1u;
+	}
+	if (slot == 2u)
+	{
+		*page0 = 8u;
+		*page1 = 9u;
+		*magic0 = FLASH_STORAGE_MAGIC_RC_YAW_SLOT2_P0;
+		*magic1 = FLASH_STORAGE_MAGIC_RC_YAW_SLOT2_P1;
+		return 1u;
+	}
+	return 0u;
+}
+
+uint8 flash_storage_save_rc_yaw_record(const float *yaw_points, uint16 count, uint8 slot)
+{
+	uint32 page0;
+	uint32 page1;
+	uint32 magic0;
+	uint32 magic1;
+
+	if ((yaw_points == NULL) || (count == 0u) || (count > (uint16)2038u))
+	{
+		return 0u;
+	}
+	if (!flash_storage_get_rc_yaw_slot(slot, &page0, &page1, &magic0, &magic1))
 	{
 		return 0u;
 	}
 
 	{
-		uint16 count0 = (count > (uint16)900u) ? (uint16)900u : count;
+		uint16 count0 = (count > (uint16)1019u) ? (uint16)1019u : count;
 		uint16 count1 = (uint16)(count - count0);
 
 		memset((void *)&s_flash_rc_yaw_part0, 0, sizeof(s_flash_rc_yaw_part0));
@@ -407,8 +459,8 @@ uint8 flash_storage_save_rc_yaw_record(const float *yaw_points, uint16 count)
 
 		if (!flash_storage_write_blob(
 				FLASH_STORAGE_SECTOR_RC_YAW,
-				FLASH_STORAGE_PAGE_RC_YAW,
-				FLASH_STORAGE_MAGIC_RC_YAW_P0,
+				page0,
+				magic0,
 				(const void *)&s_flash_rc_yaw_part0,
 				(uint16)sizeof(s_flash_rc_yaw_part0)))
 		{
@@ -427,25 +479,34 @@ uint8 flash_storage_save_rc_yaw_record(const float *yaw_points, uint16 count)
 
 		return flash_storage_write_blob(
 			FLASH_STORAGE_SECTOR_RC_YAW,
-			FLASH_STORAGE_PAGE_RC_YAW_EX,
-			FLASH_STORAGE_MAGIC_RC_YAW_P1,
+			page1,
+			magic1,
 			(const void *)&s_flash_rc_yaw_part1,
 			(uint16)sizeof(s_flash_rc_yaw_part1));
 	}
 }
 
-uint8 flash_storage_load_rc_yaw_record(float *yaw_points, uint16 max_points, uint16 *out_count)
+uint8 flash_storage_load_rc_yaw_record(float *yaw_points, uint16 max_points, uint16 *out_count, uint8 slot)
 {
+	uint32 page0;
+	uint32 page1;
+	uint32 magic0;
+	uint32 magic1;
+
 	if ((yaw_points == NULL) || (out_count == NULL) || (max_points == 0u))
 	{
 		return 0u;
 	}
+	if (!flash_storage_get_rc_yaw_slot(slot, &page0, &page1, &magic0, &magic1))
+	{
+		return 0u;
+	}
 
-	// 新格式：两页（最多 1800 点）
+	// 新格式：两页（最多 2038 点，每页 1019 点）
 	if (flash_storage_read_blob(
 			FLASH_STORAGE_SECTOR_RC_YAW,
-			FLASH_STORAGE_PAGE_RC_YAW,
-			FLASH_STORAGE_MAGIC_RC_YAW_P0,
+			page0,
+			magic0,
 			(void *)&s_flash_rc_yaw_part0,
 			(uint16)sizeof(s_flash_rc_yaw_part0)))
 	{
@@ -453,12 +514,12 @@ uint8 flash_storage_load_rc_yaw_record(float *yaw_points, uint16 max_points, uin
 		uint16 count0 = s_flash_rc_yaw_part0.part_count;
 		uint16 count1;
 
-		if ((total == 0u) || (total > (uint16)1800u)) return 0u;
-		if ((count0 == 0u) || (count0 > (uint16)900u) || (count0 > total)) return 0u;
+		if ((total == 0u) || (total > (uint16)2038u)) return 0u;
+		if ((count0 == 0u) || (count0 > (uint16)1019u) || (count0 > total)) return 0u;
 		if (total > max_points) return 0u;
 
 		count1 = (uint16)(total - count0);
-		if (count1 > (uint16)900u) return 0u;
+		if (count1 > (uint16)1019u) return 0u;
 
 		memcpy((void *)yaw_points,
 		       (const void *)s_flash_rc_yaw_part0.yaw_points,
@@ -468,8 +529,8 @@ uint8 flash_storage_load_rc_yaw_record(float *yaw_points, uint16 max_points, uin
 		{
 			if (!flash_storage_read_blob(
 					FLASH_STORAGE_SECTOR_RC_YAW,
-					FLASH_STORAGE_PAGE_RC_YAW_EX,
-					FLASH_STORAGE_MAGIC_RC_YAW_P1,
+					page1,
+					magic1,
 					(void *)&s_flash_rc_yaw_part1,
 					(uint16)sizeof(s_flash_rc_yaw_part1)))
 			{
@@ -488,8 +549,61 @@ uint8 flash_storage_load_rc_yaw_record(float *yaw_points, uint16 max_points, uin
 		return 1u;
 	}
 
-	// 兼容旧格式：单页（最多 900 点）
-	if (!flash_storage_read_blob(
+	// 兼容旧版两页格式：每页 900 点，同 magic 但 struct 更小
+	{
+		const uint16 old_sz = (uint16)sizeof(flash_rc_yaw_part_old_t);
+		if (flash_storage_read_blob(
+				FLASH_STORAGE_SECTOR_RC_YAW,
+				page0,
+				magic0,
+				(void *)&s_flash_rc_yaw_part0_old,
+				old_sz))
+		{
+			uint16 total = s_flash_rc_yaw_part0_old.total_count;
+			uint16 count0 = s_flash_rc_yaw_part0_old.part_count;
+			uint16 count1;
+
+			if ((total > 0u) && (total <= (uint16)1800u) &&
+			    (count0 > 0u) && (count0 <= (uint16)900u) && (count0 <= total) &&
+			    (total <= max_points))
+			{
+				count1 = (uint16)(total - count0);
+				if (count1 <= (uint16)900u)
+				{
+					memcpy((void *)yaw_points,
+					       (const void *)s_flash_rc_yaw_part0_old.yaw_points,
+					       (size_t)count0 * sizeof(float));
+
+					if (count1 > 0u)
+					{
+						if (flash_storage_read_blob(
+								FLASH_STORAGE_SECTOR_RC_YAW,
+								page1,
+								magic1,
+								(void *)&s_flash_rc_yaw_part1_old,
+								old_sz) &&
+						    (s_flash_rc_yaw_part1_old.total_count == total) &&
+						    (s_flash_rc_yaw_part1_old.part_count == count1))
+						{
+							memcpy((void *)(yaw_points + count0),
+							       (const void *)s_flash_rc_yaw_part1_old.yaw_points,
+							       (size_t)count1 * sizeof(float));
+							*out_count = total;
+							return 1u;
+						}
+					}
+					else
+					{
+						*out_count = total;
+						return 1u;
+					}
+				}
+			}
+		}
+	}
+
+	// 兼容最旧格式：单页（最多 900 点，magic RYCF）
+	if ((slot != 1u) || !flash_storage_read_blob(
 			FLASH_STORAGE_SECTOR_RC_YAW,
 			FLASH_STORAGE_PAGE_RC_YAW,
 			FLASH_STORAGE_MAGIC_RC_YAW,
@@ -514,53 +628,65 @@ uint8 flash_storage_load_rc_yaw_record(float *yaw_points, uint16 max_points, uin
 	return 1u;
 }
 
-uint8 flash_storage_save_kemu1_cfg(void)
+// ============================================================================
+// 统一段表：KM3 + KM1 + MAIN + EX1 + EX2（page 6）
+// ============================================================================
+
+typedef struct
 {
-	flash_kemu1_cfg_t cfg;
-	cfg.counts_per_meter = (int32)g_ttop_kemu1_counts_per_meter;
-	memcpy((void *)cfg.seg_table, (const void *)g_ttop_kemu1_seg_table, sizeof(cfg.seg_table));
+	ttop_kemu3_seg_t  km3_table[8];
+	int32             km1_counts_per_meter;
+	ttop_kemu1_seg_t  km1_table[7];
+	ttop_eight2_seg_t eight_main[12];
+	ttop_eight2_seg_t eight_ex1[12];
+	ttop_eight2_seg_t eight_ex2[12];
+} flash_kemu_all_cfg_t;
+
+uint8 flash_storage_save_kemu_all(void)
+{
+	flash_kemu_all_cfg_t all;
+
+	memcpy((void *)all.km3_table, (const void *)g_ttop_kemu3_seg_table, sizeof(all.km3_table));
+	all.km1_counts_per_meter = (int32)g_ttop_kemu1_counts_per_meter;
+	memcpy((void *)all.km1_table, (const void *)g_ttop_kemu1_seg_table, sizeof(all.km1_table));
+	memcpy((void *)all.eight_main, (const void *)g_eight2_prog,     sizeof(all.eight_main));
+	memcpy((void *)all.eight_ex1,  (const void *)g_eight2_prog_ex1, sizeof(all.eight_ex1));
+	memcpy((void *)all.eight_ex2,  (const void *)g_eight2_prog_ex2, sizeof(all.eight_ex2));
 
 	return flash_storage_write_blob(
-		FLASH_STORAGE_SECTOR_KEMU1,
-		FLASH_STORAGE_PAGE_KEMU1,
-		FLASH_STORAGE_MAGIC_KEMU1,
-		(const void *)&cfg,
-		(uint16)sizeof(cfg));
+		FLASH_STORAGE_SECTOR_KEMU3,
+		FLASH_STORAGE_PAGE_KEMU3,
+		FLASH_STORAGE_MAGIC_KEMU_ALL,
+		(const void *)&all,
+		(uint16)sizeof(all));
 }
 
-uint8 flash_storage_load_kemu1_cfg(void)
+uint8 flash_storage_load_kemu_all(void)
 {
-	flash_kemu1_cfg_t cfg;
+	flash_kemu_all_cfg_t all;
+
 	if (!flash_storage_read_blob(
-			FLASH_STORAGE_SECTOR_KEMU1,
-			FLASH_STORAGE_PAGE_KEMU1,
-			FLASH_STORAGE_MAGIC_KEMU1,
-			(void *)&cfg,
-			(uint16)sizeof(cfg)))
+			FLASH_STORAGE_SECTOR_KEMU3,
+			FLASH_STORAGE_PAGE_KEMU3,
+			FLASH_STORAGE_MAGIC_KEMU_ALL,
+			(void *)&all,
+			(uint16)sizeof(all)))
 	{
 		return 0u;
 	}
 
-	g_ttop_kemu1_counts_per_meter = (int)cfg.counts_per_meter;
-	memcpy((void *)g_ttop_kemu1_seg_table, (const void *)cfg.seg_table, sizeof(cfg.seg_table));
+	memcpy((void *)g_ttop_kemu3_seg_table, (const void *)all.km3_table, sizeof(all.km3_table));
+	g_ttop_kemu1_counts_per_meter = (int32)all.km1_counts_per_meter;
+	memcpy((void *)g_ttop_kemu1_seg_table, (const void *)all.km1_table, sizeof(all.km1_table));
+	memcpy((void *)g_eight2_prog,     (const void *)all.eight_main, sizeof(all.eight_main));
+	memcpy((void *)g_eight2_prog_ex1, (const void *)all.eight_ex1,  sizeof(all.eight_ex1));
+	memcpy((void *)g_eight2_prog_ex2, (const void *)all.eight_ex2,  sizeof(all.eight_ex2));
+
 	ttop_kemu1_rebuild_targets();
+	ttop_kemu3_rebuild_targets();
+	ttop_kemu3_rebuild_ex3_table();
 	return 1u;
 }
-
-/* ============================================================================
- *  惯导航点表（INS Path）Flash 存储
- *
- *  说明：
- *  - 航点表较大（最多 500 × 8 = 4000 字节），不适合在栈上分配临时缓冲区。
- *  - 因此采用"直接操作 flash_union_buffer"的方式读写，不经过 write_blob。
- *  - 页内布局：
- *    [0] magic        : FLASH_STORAGE_MAGIC_INS
- *    [1] version<<16 | count  : 高16位=版本号，低16位=航点数
- *    [2] crc32        : 对航点数据的 CRC 校验
- *    [3] reserved     : 保留（0）
- *    [4..] payload    : 航点数据，每个航点占 2 个 uint32（float x, float y）
- * ============================================================================ */
-
 uint8 flash_storage_save_ins_path(void)
 {
 	uint16 n = g_ins_path_count;
@@ -689,33 +815,7 @@ uint8 flash_storage_load_slope_cfg(void)
 
 // ============================================================================
 // Flash 存储 —— g_ttop_kemu3_seg_table（KEMU3 段表）
-// ============================================================================
-
-uint8 flash_storage_save_kemu3_seg(void)
-{
-	return flash_storage_write_blob(
-		FLASH_STORAGE_SECTOR_KEMU3,
-		FLASH_STORAGE_PAGE_KEMU3,
-		FLASH_STORAGE_MAGIC_KEMU3,
-		(const void *)g_ttop_kemu3_seg_table,
-		(uint16)sizeof(ttop_kemu3_seg_t) * TTOP_KEMU3_SEG_COUNT);
-}
-
-uint8 flash_storage_load_kemu3_seg(void)
-{
-	ttop_kemu3_seg_t tmp[TTOP_KEMU3_SEG_COUNT];
-	if (!flash_storage_read_blob(
-			FLASH_STORAGE_SECTOR_KEMU3,
-			FLASH_STORAGE_PAGE_KEMU3,
-			FLASH_STORAGE_MAGIC_KEMU3,
-			(void *)tmp,
-			(uint16)sizeof(ttop_kemu3_seg_t) * TTOP_KEMU3_SEG_COUNT))
-	{
-		return 0u;
-	}
-	memcpy((void *)g_ttop_kemu3_seg_table, (const void *)tmp, sizeof(tmp));
-	return 1u;
-}
+// old KMU3 seg save/load removed — merged into KEMU_ALL above
 
 // ============================================================================
 // Flash 存储 —— 杂项配置（flash_misc_cfg_t）
@@ -739,11 +839,16 @@ uint8 flash_storage_save_misc_cfg(void)
 	cfg.kemu3_yaw_ki_path        = g_kemu3_yaw_ki_path;
 	cfg.kemu3_counts_per_meter   = g_ttop_kemu3_counts_per_meter;
 
+	// ---- 舵机零点 ----
+	cfg.servo_zero_offset_deg = g_servo_zero_offset_deg;
+
 	// ---- MOTOR_PID ----
 	motor_get_pid_gains(&cfg.motor_kp, &cfg.motor_ki, &cfg.motor_kd);
 	motor_get_pitch_speed_boost_params(&cfg.motor_pitch_boost_threshold, &cfg.motor_pitch_boost_k);
 	cfg.motor_pitch_boost_max = motor_get_pitch_speed_boost_max_counts();
 	cfg.motor_pitch_boost_enable = motor_get_pitch_speed_boost_enable();
+	cfg.motor_boost_mode = motor_get_boost_mode();
+	motor_get_boost_map_k(&cfg.motor_boost_k_duty, &cfg.motor_boost_k_pitch, &cfg.motor_boost_k_acc);
 
 	// reserved 填充 0（后续新增字段会覆盖对应位置）
 	memset((void *)cfg.reserved, 0, sizeof(cfg.reserved));
@@ -751,6 +856,7 @@ uint8 flash_storage_save_misc_cfg(void)
 	cfg._pad0[0] = 0; cfg._pad0[1] = 0; cfg._pad0[2] = 0;
 	cfg._pad1[0] = 0; cfg._pad1[1] = 0; cfg._pad1[2] = 0;
 	cfg._pad2[0] = 0; cfg._pad2[1] = 0; cfg._pad2[2] = 0;
+	cfg._pad3[0] = 0; cfg._pad3[1] = 0; cfg._pad3[2] = 0;
 
 	return flash_storage_write_blob(
 		FLASH_STORAGE_SECTOR_MISC,
@@ -791,11 +897,22 @@ uint8 flash_storage_load_misc_cfg(void)
 	g_ttop_kemu3_counts_per_meter         = cfg.kemu3_counts_per_meter;
 	ttop_kemu3_rebuild_targets();
 
+	// ---- 舵机零点 ----
+	g_servo_zero_offset_deg = cfg.servo_zero_offset_deg;
+
 	// ---- MOTOR_PID ----
 	motor_set_pid_gains(cfg.motor_kp, cfg.motor_ki, cfg.motor_kd);
 	motor_set_pitch_speed_boost_params(cfg.motor_pitch_boost_threshold, cfg.motor_pitch_boost_k);
 	motor_set_pitch_speed_boost_max_counts(cfg.motor_pitch_boost_max);
-	motor_set_pitch_speed_boost_enable(cfg.motor_pitch_boost_enable);
+	motor_set_boost_map_k(cfg.motor_boost_k_duty, cfg.motor_boost_k_pitch, cfg.motor_boost_k_acc);
+	if (cfg.motor_boost_mode <= 3u)
+	{
+		motor_set_boost_mode(cfg.motor_boost_mode);
+	}
+	else
+	{
+		motor_set_pitch_speed_boost_enable(cfg.motor_pitch_boost_enable);
+	}
 
 	return 1u;
 }

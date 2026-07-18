@@ -22,11 +22,11 @@ static unsigned char s_rc_emergency_active = 0u;
 
 // ============================ RC Yaw 录制/回放（50ms采样） ============================
 #ifndef TTOP_RC_YAW_SAMPLE_TICKS_5MS
-#define TTOP_RC_YAW_SAMPLE_TICKS_5MS   (10u) // 10 * 5ms = 50ms
+#define TTOP_RC_YAW_SAMPLE_TICKS_5MS   (12u) // 12 * 5ms = 60ms
 #endif
 
 #ifndef TTOP_RC_YAW_RECORD_MAX_POINTS
-#define TTOP_RC_YAW_RECORD_MAX_POINTS  (1800u) // 1800 * 50ms = 90s（Flash 双页存储）
+#define TTOP_RC_YAW_RECORD_MAX_POINTS  (2038u) // 2 × 1019 点 × 60ms ≈ 122s
 #endif
 
 static float s_rc_yaw_record_buf[TTOP_RC_YAW_RECORD_MAX_POINTS];
@@ -141,13 +141,13 @@ void ttop_rc_control_init(void)
     s_rc_cfg.speed.in_max = 1400.0f;
     s_rc_cfg.speed.out_min = 0.0f;
     s_rc_cfg.speed.out_center = 0.0f;
-    s_rc_cfg.speed.out_max = 420.0f;
+    s_rc_cfg.speed.out_max = 600.0f;
     s_rc_cfg.speed.sensitivity = 1.0f;
 
     s_rc_speed_target_out = 0.0f;
 
-    // 上电尝试加载上次保存的 yaw 轨迹（失败不影响运行）
-    (void)ttop_rc_yaw_record_load_from_flash();
+    // 上电默认加载槽位 1；START 时会按菜单选择的槽位再次加载。
+    (void)ttop_rc_yaw_record_load_from_flash(1u);
 }
 
 void ttop_rc_control_set_config(const ttop_rc_control_cfg_t *cfg)
@@ -343,6 +343,30 @@ void ttop_rc_control_yaw_only_task_5ms(void)
     uart_receiver.finsh_flag = 0u;
 }
 
+void ttop_rc_control_yaw_direct_task_5ms(void)
+{
+    // 不做 MODE3 守卫，不做速度输出，纯 CH0→yaw
+    if (uart_receiver.finsh_flag == 0u) return;
+    if (uart_receiver.state == 0u)
+    {
+        uart_receiver.finsh_flag = 0u;
+        return;
+    }
+    if (s_rc_emergency_active)
+    {
+        uart_receiver.finsh_flag = 0u;
+        return;
+    }
+    {
+        float yaw_unit_cmd = ttop_rc_map_ch0_to_unit_cmd((float)uart_receiver.channel[0]);
+        float yaw_rate_lim = s_rc_cfg.yaw_rate_limit_deg_per_5ms;
+        if (yaw_rate_lim < 0.0f) yaw_rate_lim = -yaw_rate_lim;
+        // 录制模式：不做低速衰减，不做额外限制，忠实记录遥控操作
+        g_yaw_target_deg -= yaw_unit_cmd * yaw_rate_lim;
+    }
+    uart_receiver.finsh_flag = 0u;
+}
+
 void ttop_rc_yaw_record_start(void)
 {
     s_rc_yaw_record_active = 1u;
@@ -422,20 +446,22 @@ void ttop_rc_yaw_replay_task_5ms(void)
     }
 }
 
-uint8 ttop_rc_yaw_record_save_to_flash(void)
+uint8 ttop_rc_yaw_record_save_to_flash(uint8 slot)
 {
     return flash_storage_save_rc_yaw_record(
         (const float *)s_rc_yaw_record_buf,
-        s_rc_yaw_record_count);
+    s_rc_yaw_record_count,
+    slot);
 }
 
-uint8 ttop_rc_yaw_record_load_from_flash(void)
+uint8 ttop_rc_yaw_record_load_from_flash(uint8 slot)
 {
     uint16 count = 0u;
     if (!flash_storage_load_rc_yaw_record(
             (float *)s_rc_yaw_record_buf,
             (uint16)TTOP_RC_YAW_RECORD_MAX_POINTS,
-            &count))
+        &count,
+        slot))
     {
         return 0u;
     }

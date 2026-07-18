@@ -32,6 +32,10 @@ void ttop_funtion_mode_once_apply(void)
 	
 	static uint8 s_last_kemu = 0xFFu;
 
+	if (s_last_kemu == funtion_kemu)
+	{
+		return;
+	}
 	s_last_kemu = funtion_kemu;
 
 
@@ -90,8 +94,10 @@ void ttop_funtion_mode_once_apply(void)
 		ins_dr_init();// 初始化航迹推算
 		ins_path_follow_init();// 初始化跟踪控制器
 	}
-	else if (funtion_kemu == 11u)// MODE11：RC预留
+	else if(funtion_kemu == 11u)// MODE11：遥控器专属 KM3 轨迹录制/回放
 	{
+		// MODE11 也需要预加载 KM3 两个轨迹区，不能只在 MODE7 初始化。
+		ttop_kemu3_init();
 		ttop_rc_control_init();
 		ttop_speed_change_init(PID_MODE_CASCADE_EX2, PID_MODE_CASCADE_EX1);
 	}
@@ -139,21 +145,32 @@ void ttop_funtion_new(void)
 		ttop_speed_change_task_5ms();
 
 	}
-	// MODE3：直线速度55
+	// MODE3 (KM2)：遥控器控制 + 录制 + 回放
 	else if(funtion_kemu == 3)
 	{
-		// MODE3：统一调用三个 5ms 函数，是否执行由函数内部按标志位判断。
+		uint8 replay_was = ttop_rc_yaw_replay_is_active();
+
 		ttop_rc_control_yaw_only_task_5ms();
 		ttop_rc_yaw_record_task_5ms();
 		ttop_rc_yaw_replay_task_5ms();
 
+		// 回放刚完成 → 自动停止
+		if (replay_was && !ttop_rc_yaw_replay_is_active())
+		{
+			funtion_ready_flag = 0u;
+			motor_set_target_counts_per_5ms(0);
+		}
 	}
 	// MODE4：直线速度45
 	else if(funtion_kemu == 4){}
-	// MODE5：直线速度200+转弯
+	// MODE5 (KM1)：7 段路径，跑完自动停
 	else if(funtion_kemu == 5)
 	{
-		ttop_kemu1_task_5ms();
+		if (ttop_kemu1_task_5ms())
+		{
+			funtion_ready_flag = 0u;
+			motor_set_target_counts_per_5ms(0);
+		}
 		ttop_speed_change_task_5ms();
 
 
@@ -169,7 +186,25 @@ void ttop_funtion_new(void)
 	// MODE7：kemu3
 	else if(funtion_kemu == 7)
 	{
-		ttop_kemu3_task_5ms();
+		// USE_REC=2: 遥控录制 — RC 裸 yaw 写方向，录制任务采样到 slot2
+		if (g_kemu3_use_recorded_turn == 2u)
+		{
+			ttop_rc_control_yaw_direct_task_5ms();
+			ttop_kemu3_record_task_5ms();
+		}
+		// USE_REC=3: 回放 — slot2 全程回放写方向
+		else if (g_kemu3_use_recorded_turn == 3u)
+		{
+			ttop_kemu3_replay_task_5ms();
+		}
+		// KM3 只管速度+距离，方向由上面分支管理
+		if (ttop_kemu3_task_5ms())
+		{
+			funtion_ready_flag = 0u;
+			motor_set_target_counts_per_5ms(0);
+			ttop_kemu3_record_stop();
+			ttop_kemu3_replay_stop();
+		}
 		ttop_speed_change_task_5ms();
 	}
 	// MODE8：
@@ -199,10 +234,23 @@ void ttop_funtion_new(void)
 		ttop_speed_change_task_5ms();
 		
 	}
-	// MODE11：RC预留
+	// MODE11：遥控器专属 KM3 轨迹录制/回放
 	else if(funtion_kemu == 11)
 	{
-		ttop_rc_control_task_5ms();
+		if (menu_kemu3_record_enabled())
+		{
+			ttop_kemu3_record_task_5ms();
+		}
+		if (menu_kemu3_replay_enabled())
+		{
+			// 回放时保留遥控器 CH1 速度控制，屏蔽完整 RC 任务中的 CH0 yaw 控制。
+			ttop_rc_control_speed_only_task_5ms();
+			ttop_kemu3_replay_task_5ms();
+		}
+		else
+		{
+			ttop_rc_control_task_5ms();
+		}
 		ttop_speed_change_task_5ms();
 	}
 	// MODE12：预留
@@ -243,19 +291,14 @@ void ttop_funtion_init(void)
     Key_init();                 // 按键初始化
 	motor_pid_init();  // 电机速度环 PID 初始化
     //PID_INIT_NO_RATE();         // 舵机PID 初始化，NO_RATE->无角速度环版本
-    // 上电加载：从 Flash 恢复 PID 配置表与八字段表
+	// 上电加载：从 Flash 恢复 PID 配置表与 KM3 轨迹
     // 说明：
     // - 若 Flash 未初始化/校验失败，load 会返回 0，不会覆盖 RAM 默认值。
     // - 载入完成后，直接用“当前模式”做一次初始化（PID_INIT_BY_MODE），确保参数生效。
     (void)flash_storage_load_pid_mode_cfg();
-    (void)flash_storage_load_eight2_prog();
-	(void)flash_storage_load_eight2_prog_ex1();
-	(void)flash_storage_load_eight2_prog_ex2();
-	(void)flash_storage_load_kemu1_cfg();
+	(void)flash_storage_load_kemu_all();
 	(void)flash_storage_load_ins_path();
-	(void)flash_storage_load_kemu1_cfg();
 	(void)flash_storage_load_slope_cfg();
-	(void)flash_storage_load_kemu3_seg();
 	(void)flash_storage_load_misc_cfg();
 
 	// 舵机 PID 初始化：按当前模式（funtion_kemu）初始化一次

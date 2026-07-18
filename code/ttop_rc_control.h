@@ -43,6 +43,8 @@ void ttop_rc_control_task_5ms(void);
 void ttop_rc_control_speed_only_task_5ms(void);
 // 仅根据 RC 调整方向（不改变速度目标）
 void ttop_rc_control_yaw_only_task_5ms(void);
+// 裸 yaw 控制：不做 MODE3 守卫，不做速度输出。供 KM3 USE_REC=2 遥控录制使用。
+void ttop_rc_control_yaw_direct_task_5ms(void);
 
 // ============================ RC Yaw 轨迹录制/回放（50ms采样） ============================
 // 录制：在 5ms 调用函数内部累计到 50ms 采样一次 g_yaw_target_deg 到数组
@@ -55,9 +57,9 @@ void ttop_rc_yaw_replay_start(void);
 void ttop_rc_yaw_replay_stop(void);
 void ttop_rc_yaw_replay_task_5ms(void);
 
-// 存储：调用时执行一次存储/加载（使用 DFLASH 第 2 页）
-uint8 ttop_rc_yaw_record_save_to_flash(void);
-uint8 ttop_rc_yaw_record_load_from_flash(void);
+// 存储：slot 1 使用 RCY0/RCY1，slot 2 使用 RCY3/RCY4
+uint8 ttop_rc_yaw_record_save_to_flash(uint8 slot);
+uint8 ttop_rc_yaw_record_load_from_flash(uint8 slot);
 
 // 状态查询
 uint8 ttop_rc_yaw_record_is_active(void);

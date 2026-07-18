@@ -54,6 +54,12 @@ void motor_set_pitch_speed_boost_max_counts(float max_counts);
 float motor_get_pitch_speed_boost_max_counts(void);
 float motor_get_pitch_speed_boost_counts(void);
 
+// BOOST 模式：0=OFF, 1=DUTY, 2=PITCH, 3=ACC_RATE
+void motor_set_boost_mode(uint8 mode);
+uint8 motor_get_boost_mode(void);
+void motor_set_boost_map_k(float duty_k, float pitch_k, float acc_k);
+void motor_get_boost_map_k(float *duty_k, float *pitch_k, float *acc_k);
+
 // 根据倾角自适应调整目标速度：
 // - threshold_deg: 倒下阈值（deg），超过则进入“救车加速”
 // - speed_fall: 超阈值时设置的目标速度（counts/5ms）

@@ -14,6 +14,7 @@
 #include "motor_controller.h"
 #include "top_8_turn_2.h"
 #include "common_flie.h"
+#include "flash_storage.h"
 #include "zf_common_headfile.h"
 
 // 外部 IMU 显示变量（yaw 相对角度，由 imu_task_handler_2ms 更新）
@@ -24,6 +25,9 @@ volatile int g_ttop_kemu3_counts_per_meter = 18500;
 
 // EX2 绕 S 弯圈数（可被菜单修改）
 volatile unsigned char g_ttop_kemu3_ex2_loop_count = 2u;
+
+// USE_REC: 1=全自动(掉头slot1+S弯slot2), 2=遥控录制(全程录slot2), 3=回放(全程放slot2)
+volatile unsigned char g_kemu3_use_recorded_turn = 1u;
 
 // 回正参数：写入最后一个扩展段表的第 0 段
 volatile ttop_eight2_seg_t g_ttop_kemu3_end_seg = { -3.0f, 35.0f };
@@ -55,6 +59,32 @@ static ttop_kemu3_status_t s_kemu3;
 
 // 路径纠偏增益（可通过菜单修改）
 volatile float g_kemu3_yaw_ki_path = 0.865f;
+
+#define KEMU3_RECORD_SAMPLE_TICKS_5MS (10u)
+#define KEMU3_TURN_RECORD_MAX_POINTS  (200u)
+#define KEMU3_S_CURVE_RECORD_MAX_POINTS (700u)
+#define KEMU3_RECORD_TOTAL_POINTS     (900u)
+
+static float s_kemu3_record_points[KEMU3_RECORD_TOTAL_POINTS];
+static uint16 s_kemu3_record_count[3] = { 0u, 0u, 0u };
+static uint16 s_kemu3_record_tick_5ms = 0u;
+static uint8 s_kemu3_record_slot = 0u;
+static uint8 s_kemu3_record_active = 0u;
+static uint16 s_kemu3_replay_index = 0u;
+static uint16 s_kemu3_replay_tick_5ms = 0u;
+static uint8 s_kemu3_replay_slot = 0u;
+static uint8 s_kemu3_replay_active = 0u;
+static float s_kemu3_replay_yaw_base = 0.0f;
+
+static uint16 ttop_kemu3_record_offset_local(uint8 slot)
+{
+	return (slot == 1u) ? 0u : 200u;
+}
+
+static uint16 ttop_kemu3_record_capacity_local(uint8 slot)
+{
+	return (slot == 1u) ? KEMU3_TURN_RECORD_MAX_POINTS : KEMU3_S_CURVE_RECORD_MAX_POINTS;
+}
 
 static float s_kemu3_yaw_integral = 0.0f;
 static uint8 s_kemu3_yaw_integral_done = 0u;  // 前10m积分完成后置1，不再碰g_yaw_target_deg
@@ -109,6 +139,10 @@ static void ttop_kemu3_reset_runtime_local(void)
 	s_kemu3.last_encoder_total = encoder_get_demo5_count_total();
 	s_kemu3_yaw_integral = 0.0f;
 	s_kemu3_yaw_integral_done = 0u;
+	s_kemu3_replay_active = 0u;
+	s_kemu3_replay_index = 0u;
+	s_kemu3_replay_tick_5ms = 0u;
+	s_kemu3_replay_yaw_base = 0.0f;
 }
 
 static void ttop_kemu3_clear_prog_local(volatile ttop_eight2_seg_t *prog)
@@ -137,7 +171,7 @@ static unsigned short ttop_kemu3_base_len_local(const ttop_eight2_seg_t *base)
 	return base_len;
 }
 
-static void ttop_kemu3_rebuild_ex3_table_local(void)
+void ttop_kemu3_rebuild_ex3_table(void)
 {
 	unsigned short i;
 	unsigned short j;
@@ -204,17 +238,161 @@ void ttop_kemu3_rebuild_targets(void)
 	}
 }
 
+void ttop_kemu3_record_start(uint8 slot)
+{
+	uint16 offset;
+	if ((slot < 1u) || (slot > 2u)) return;
+	offset = ttop_kemu3_record_offset_local(slot);
+	s_kemu3_record_slot = slot;
+	s_kemu3_record_count[slot] = 0u;
+	s_kemu3_record_tick_5ms = 0u;
+	s_kemu3_record_active = 1u;
+	s_kemu3_replay_active = 0u;
+	s_kemu3_replay_yaw_base = 0.0f;
+	s_kemu3_record_points[offset] = g_yaw_target_deg;
+	s_kemu3_record_count[slot] = 1u;
+}
+
+void ttop_kemu3_record_stop(void)
+{
+	s_kemu3_record_active = 0u;
+}
+
+void ttop_kemu3_record_task_5ms(void)
+{
+	uint16 offset;
+	uint16 capacity;
+	if (!s_kemu3_record_active) return;
+	offset = ttop_kemu3_record_offset_local(s_kemu3_record_slot);
+	capacity = ttop_kemu3_record_capacity_local(s_kemu3_record_slot);
+	if (s_kemu3_record_count[s_kemu3_record_slot] >= capacity)
+	{
+		s_kemu3_record_active = 0u;
+		(void)ttop_kemu3_record_save_to_flash(s_kemu3_record_slot);
+		return;
+	}
+	s_kemu3_record_tick_5ms++;
+	if (s_kemu3_record_tick_5ms >= KEMU3_RECORD_SAMPLE_TICKS_5MS)
+	{
+		s_kemu3_record_tick_5ms = 0u;
+		s_kemu3_record_points[offset + s_kemu3_record_count[s_kemu3_record_slot]++] = g_yaw_target_deg;
+		if (s_kemu3_record_count[s_kemu3_record_slot] >= capacity)
+		{
+			s_kemu3_record_active = 0u;
+			(void)ttop_kemu3_record_save_to_flash(s_kemu3_record_slot);
+		}
+	}
+}
+
+uint8 ttop_kemu3_record_save_to_flash(uint8 slot)
+{
+	uint16 offset;
+	if ((slot < 1u) || (slot > 2u)) return 0u;
+	offset = ttop_kemu3_record_offset_local(slot);
+	return flash_storage_save_kemu3_record(
+		slot,
+		(const float *)&s_kemu3_record_points[offset],
+		s_kemu3_record_count[slot]);
+}
+
+uint16 ttop_kemu3_get_record_count(uint8 slot)
+{
+	if ((slot < 1u) || (slot > 2u)) return 0u;
+	return s_kemu3_record_count[slot];
+}
+
+uint8 ttop_kemu3_record_load_from_flash(uint8 slot)
+{
+	uint16 offset;
+	uint16 count = 0u;
+	if ((slot < 1u) || (slot > 2u)) return 0u;
+	offset = ttop_kemu3_record_offset_local(slot);
+	if (!flash_storage_load_kemu3_record(
+			slot,
+			(float *)&s_kemu3_record_points[offset],
+			ttop_kemu3_record_capacity_local(slot),
+			&count))
+	{
+		return 0u;
+	}
+	s_kemu3_record_count[slot] = count;
+	return 1u;
+}
+
+void ttop_kemu3_replay_start(uint8 slot)
+{
+	uint16 offset;
+	if (!ttop_kemu3_record_load_from_flash(slot))
+	{
+		s_kemu3_replay_active = 0u;
+		s_kemu3_replay_yaw_base = 0.0f;
+		return;
+	}
+	offset = ttop_kemu3_record_offset_local(slot);
+	s_kemu3_replay_slot = slot;
+	s_kemu3_replay_index = 1u;
+	s_kemu3_replay_tick_5ms = 0u;
+	s_kemu3_replay_active = 1u;
+	// slot 2（S弯）以当前 yaw 为基准偏移做相对回放；slot 1（掉头）保持绝对回放
+	if (slot == 2u)
+	{
+		s_kemu3_replay_yaw_base = g_yaw_target_deg;
+		g_yaw_target_deg = s_kemu3_replay_yaw_base + s_kemu3_record_points[offset];
+	}
+	else
+	{
+		g_yaw_target_deg = s_kemu3_record_points[offset];
+	}
+}
+
+void ttop_kemu3_replay_stop(void)
+{
+	s_kemu3_replay_active = 0u;
+	s_kemu3_replay_yaw_base = 0.0f;
+}
+
+void ttop_kemu3_replay_task_5ms(void)
+{
+	uint16 offset;
+	uint16 count;
+	if (!s_kemu3_replay_active) return;
+	offset = ttop_kemu3_record_offset_local(s_kemu3_replay_slot);
+	count = s_kemu3_record_count[s_kemu3_replay_slot];
+	if (s_kemu3_replay_index >= count)
+	{
+		s_kemu3_replay_active = 0u;
+		s_kemu3_replay_yaw_base = 0.0f;
+		return;
+	}
+	s_kemu3_replay_tick_5ms++;
+	if (s_kemu3_replay_tick_5ms >= KEMU3_RECORD_SAMPLE_TICKS_5MS)
+	{
+		s_kemu3_replay_tick_5ms = 0u;
+		// slot 2（S弯）：相对回放，叠加基准偏移；slot 1（掉头）：绝对回放
+		if (s_kemu3_replay_slot == 2u)
+		{
+			g_yaw_target_deg = s_kemu3_replay_yaw_base + s_kemu3_record_points[offset + s_kemu3_replay_index++];
+		}
+		else
+		{
+			g_yaw_target_deg = s_kemu3_record_points[offset + s_kemu3_replay_index++];
+		}
+	}
+}
+
 void ttop_kemu3_init(void)
 {
+	(void)ttop_kemu3_record_load_from_flash(1u);
+	(void)ttop_kemu3_record_load_from_flash(2u);
 	ttop_kemu3_rebuild_targets();
-	ttop_kemu3_rebuild_ex3_table_local();
+	ttop_kemu3_rebuild_ex3_table();
 	ttop_kemu3_reset_runtime_local();
 }
 
 void ttop_kemu3_reset(void)
 {
 	ttop_kemu3_rebuild_targets();
-	ttop_kemu3_rebuild_ex3_table_local();
+	ttop_kemu3_rebuild_ex3_table();
 	ttop_kemu3_reset_runtime_local();
 }
 
@@ -226,6 +404,8 @@ void ttop_kemu3_start(void)
 	s_kemu3.turn_inited = 0u;
 	s_kemu3.straight_counts_accum = 0;
 	s_kemu3.last_encoder_total = encoder_get_demo5_count_total();
+	s_kemu3_replay_active = 0u;
+	s_kemu3_replay_yaw_base = 0.0f;
 }
 
 unsigned char ttop_kemu3_task_5ms(void)
@@ -258,6 +438,46 @@ unsigned char ttop_kemu3_task_5ms(void)
 
 		if (seg->seg_type == TTOP_KEMU3_SEG_TURN)
 		{
+			// USE_REC≠1（录制/回放模式）：方向由外部控制，转弯段只调速、跳段
+			if (g_kemu3_use_recorded_turn != 1u)
+			{
+				s_kemu3.seg_idx++;
+				s_kemu3.turn_inited = 0u;
+				return 0u;
+			}
+
+			// USE_REC=1：原逻辑 —— slot1 掉头 + slot2 S弯
+			uint8 record_slot = (s_kemu3.seg_idx == 2u) ? 1u :
+				((s_kemu3.seg_idx == 5u) ? 2u : 0u);
+			if ((record_slot != 0u) && (s_kemu3_record_count[record_slot] > 0u))
+			{
+				if (!s_kemu3.turn_inited)
+				{
+					s_kemu3_replay_slot = record_slot;
+					s_kemu3_replay_index = 1u;
+					s_kemu3_replay_tick_5ms = 0u;
+					s_kemu3_replay_active = 1u;
+					// slot 2（S弯）以当前 yaw 为基准偏移做相对回放
+					if (record_slot == 2u)
+					{
+						s_kemu3_replay_yaw_base = g_yaw_target_deg;
+						g_yaw_target_deg = s_kemu3_replay_yaw_base + s_kemu3_record_points[ttop_kemu3_record_offset_local(record_slot)];
+					}
+					else
+					{
+						g_yaw_target_deg = s_kemu3_record_points[ttop_kemu3_record_offset_local(record_slot)];
+					}
+					s_kemu3.turn_inited = 1u;
+				}
+				ttop_kemu3_replay_task_5ms();
+				if (!s_kemu3_replay_active)
+				{
+					s_kemu3.seg_idx++;
+					s_kemu3.turn_inited = 0u;
+				}
+				return 0u;
+			}
+
 			if (!s_kemu3.turn_inited)
 			{
 				ttop_eight2_select_program((ttop_eight2_prog_id_t)seg->turn_prog_id);

@@ -20,6 +20,7 @@ volatile uint8 pid_flag = 0;
 volatile float g_yaw_zero_offset_deg = 0.0f;
 // pitch 零点偏置（度），可在 SPCH_DBG 页面调节
 volatile float g_pitch_zero_offset_deg = 0.0f;
+volatile float g_servo_zero_offset_deg = 0.0f;
 // pitch 角度低通系数（0=关闭滤波，取值建议 0~0.99）
 volatile float g_pitch_angle_lpf_alpha = 0.0f;
 
@@ -123,7 +124,8 @@ static void servo_output_cb(float out)
 	// 假设 out 范围已通过 pid_set_limits() 限幅到 e.g. -400..+400
 	// 中心值（舵机空位）：
     const int CENTER = 500;
-	int i = (int)roundf((float)CENTER + out); // out 为正时向右移动，为负时向左
+	float adj = out + g_servo_zero_offset_deg;
+	int i = (int)roundf((float)CENTER + adj);
     pwm_set_duty(PWM_CH1, SERVO_PWM(i));
 }
 
@@ -474,6 +476,58 @@ pid_mode_cfg_t s_pid_mode_cfg[PID_MODE_CFG_COUNT] =
 		.motor_target_counts_5ms = 200,
 	},
 
+	// PID_MODE_CASCADE_EX8
+	{
+		.strategy = PID_STRAT_CASCADE,
+		.ahrs_kp = 4.5f, .ahrs_ki = 0.0f,
+		.yaw_gate_off_abs_pitch_deg = 6.0f, .yaw_gate_on_abs_pitch_deg = 4.0f,
+		.yaw = { .kp = 0.7f, .ki = 0.0f, .kd = 0.0012f, .out_min = -20.0f, .out_max = 20.0f, .i_min = -10.0f, .i_max = 10.0f },
+		.angle = { .kp = 18.0f, .ki = 0.0f, .kd = 0.0008f, .out_min = -700.0f, .out_max = 700.0f, .i_min = -150.0f, .i_max = 150.0f },
+		.rate = { .kp = 1.8f, .ki = 0.0f, .kd = 0.0035f, .out_min = -600.0f, .out_max = 600.0f, .i_min = -100.0f, .i_max = 100.0f },
+		.damp_k = 0.0f, .damp_max = 0.0f,
+		.imu_filter_alpha = 0.92f, .servo_init_out = 0.0f,
+		.motor_target_counts_5ms = 200,
+	},
+
+	// PID_MODE_CASCADE_EX9
+	{
+		.strategy = PID_STRAT_CASCADE,
+		.ahrs_kp = 4.5f, .ahrs_ki = 0.0f,
+		.yaw_gate_off_abs_pitch_deg = 6.0f, .yaw_gate_on_abs_pitch_deg = 4.0f,
+		.yaw = { .kp = 0.7f, .ki = 0.0f, .kd = 0.0012f, .out_min = -20.0f, .out_max = 20.0f, .i_min = -10.0f, .i_max = 10.0f },
+		.angle = { .kp = 18.0f, .ki = 0.0f, .kd = 0.0008f, .out_min = -700.0f, .out_max = 700.0f, .i_min = -150.0f, .i_max = 150.0f },
+		.rate = { .kp = 1.8f, .ki = 0.0f, .kd = 0.0035f, .out_min = -600.0f, .out_max = 600.0f, .i_min = -100.0f, .i_max = 100.0f },
+		.damp_k = 0.0f, .damp_max = 0.0f,
+		.imu_filter_alpha = 0.92f, .servo_init_out = 0.0f,
+		.motor_target_counts_5ms = 200,
+	},
+
+	// PID_MODE_CASCADE_EX10
+	{
+		.strategy = PID_STRAT_CASCADE,
+		.ahrs_kp = 4.5f, .ahrs_ki = 0.0f,
+		.yaw_gate_off_abs_pitch_deg = 6.0f, .yaw_gate_on_abs_pitch_deg = 4.0f,
+		.yaw = { .kp = 0.7f, .ki = 0.0f, .kd = 0.0012f, .out_min = -20.0f, .out_max = 20.0f, .i_min = -10.0f, .i_max = 10.0f },
+		.angle = { .kp = 18.0f, .ki = 0.0f, .kd = 0.0008f, .out_min = -700.0f, .out_max = 700.0f, .i_min = -150.0f, .i_max = 150.0f },
+		.rate = { .kp = 1.8f, .ki = 0.0f, .kd = 0.0035f, .out_min = -600.0f, .out_max = 600.0f, .i_min = -100.0f, .i_max = 100.0f },
+		.damp_k = 0.0f, .damp_max = 0.0f,
+		.imu_filter_alpha = 0.92f, .servo_init_out = 0.0f,
+		.motor_target_counts_5ms = 200,
+	},
+
+	// PID_MODE_CASCADE_EX11
+	{
+		.strategy = PID_STRAT_CASCADE,
+		.ahrs_kp = 4.5f, .ahrs_ki = 0.0f,
+		.yaw_gate_off_abs_pitch_deg = 6.0f, .yaw_gate_on_abs_pitch_deg = 4.0f,
+		.yaw = { .kp = 0.7f, .ki = 0.0f, .kd = 0.0012f, .out_min = -20.0f, .out_max = 20.0f, .i_min = -10.0f, .i_max = 10.0f },
+		.angle = { .kp = 18.0f, .ki = 0.0f, .kd = 0.0008f, .out_min = -700.0f, .out_max = 700.0f, .i_min = -150.0f, .i_max = 150.0f },
+		.rate = { .kp = 1.8f, .ki = 0.0f, .kd = 0.0035f, .out_min = -600.0f, .out_max = 600.0f, .i_min = -100.0f, .i_max = 100.0f },
+		.damp_k = 0.0f, .damp_max = 0.0f,
+		.imu_filter_alpha = 0.92f, .servo_init_out = 0.0f,
+		.motor_target_counts_5ms = 200,
+	},
+
 };
 
 static inline const pid_mode_cfg_t *pid_mode_cfg_get(pid_mode_t mode)
@@ -484,10 +538,11 @@ static inline const pid_mode_cfg_t *pid_mode_cfg_get(pid_mode_t mode)
 	return &s_pid_mode_cfg[m];
 }
 
-void pid_dynamic_cascade_set_kp(float angle_kp, float rate_kp)
+void pid_dynamic_cascade_set_kp(float angle_kp, float rate_kp, float yaw_kp)
 {
 	pid_set_gains(&g_pid_angle, angle_kp, g_pid_angle.ki, g_pid_angle.kd);
 	pid_set_gains(&g_pid_rate, rate_kp, g_pid_rate.ki, g_pid_rate.kd);
+	pid_set_gains(&g_pid_yaw, yaw_kp, g_pid_yaw.ki, g_pid_yaw.kd);
 }
 
 static void pid_apply_gains(pid_t *pid, const pid_gains_cfg_t *cfg)

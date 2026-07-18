@@ -46,6 +46,8 @@ typedef struct
 extern volatile int g_ttop_kemu3_counts_per_meter;
 // EX2 单次弯道参数在 g_eight2_prog_ex2 中定义，以下参数用于设置重复次数。
 extern volatile unsigned char g_ttop_kemu3_ex2_loop_count;
+// USE_REC: 1=全自动(掉头slot1+S弯slot2), 2=遥控录制(全程录slot2), 3=回放(全程放slot2)
+extern volatile unsigned char g_kemu3_use_recorded_turn;
 // KEMU3 最后一段回正参数（写入最后一个扩展段表）
 extern volatile ttop_eight2_seg_t g_ttop_kemu3_end_seg;
 extern volatile ttop_kemu3_seg_t g_ttop_kemu3_seg_table[TTOP_KEMU3_SEG_COUNT];
@@ -58,7 +60,19 @@ void ttop_kemu3_start(void);
 void ttop_kemu3_reset(void);
 unsigned char ttop_kemu3_task_5ms(void);
 void ttop_kemu3_rebuild_targets(void);
+void ttop_kemu3_rebuild_ex3_table(void);
 const ttop_kemu3_status_t *ttop_kemu3_get_status(void);
+
+// KM3 轨迹录制/回放：slot 1=掉头，slot 2=S弯
+void ttop_kemu3_record_start(uint8 slot);
+void ttop_kemu3_record_stop(void);
+void ttop_kemu3_record_task_5ms(void);
+uint8 ttop_kemu3_record_save_to_flash(uint8 slot);
+uint8 ttop_kemu3_record_load_from_flash(uint8 slot);
+uint16 ttop_kemu3_get_record_count(uint8 slot);
+void ttop_kemu3_replay_start(uint8 slot);
+void ttop_kemu3_replay_stop(void);
+void ttop_kemu3_replay_task_5ms(void);
 
 #ifdef __cplusplus
 }

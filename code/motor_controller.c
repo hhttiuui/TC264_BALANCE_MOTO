@@ -17,6 +17,8 @@
 
 // pitch 角（deg），由 IMU 任务在 common_flie.c 中更新；这里用于“要倒下就加速”的策略
 extern float show_pitch_deg;
+// pitch 角速度（deg/s），由 IMU 任务在 common_flie.c 中更新。
+extern float show_pitch_rate_dps_f;
 // 舵机控制量（相对舵机中心点的偏移），在 common_flie.c 中由姿态环更新。
 extern float ips_show_pid_out;
 
@@ -60,6 +62,19 @@ static volatile uint8 g_pitch_speed_boost_enable = 0u;
 static volatile float g_pitch_speed_boost_threshold_deg = 0.3f;
 static volatile float g_pitch_speed_boost_k_counts_per_deg = 1.0f;
 static volatile float g_pitch_speed_boost_max_counts = 300.0f;
+
+typedef enum
+{
+    MOTOR_BOOST_MODE_OFF = 0u,
+    MOTOR_BOOST_MODE_DUTY = 1u,
+    MOTOR_BOOST_MODE_PITCH = 2u,
+    MOTOR_BOOST_MODE_ACC = 3u,
+} motor_boost_mode_t;
+
+static volatile uint8 g_motor_boost_mode = (uint8)MOTOR_BOOST_MODE_OFF;
+static volatile float g_motor_boost_k_duty = 1.00f;
+static volatile float g_motor_boost_k_pitch = 1.00f;
+static volatile float g_motor_boost_k_acc = 1.00f;
 
 // 启动控制逻辑已简化，软起动/推动启动相关类型已移除
 
@@ -145,12 +160,24 @@ void motor_get_pid_gains(float *kp, float *ki, float *kd)
 
 void motor_set_pitch_speed_boost_enable(uint8 enable)
 {
-    g_pitch_speed_boost_enable = (enable != 0u) ? 1u : 0u;
+    if (enable != 0u)
+    {
+        if (g_motor_boost_mode == (uint8)MOTOR_BOOST_MODE_OFF)
+        {
+            g_motor_boost_mode = (uint8)MOTOR_BOOST_MODE_DUTY;
+        }
+        g_pitch_speed_boost_enable = 1u;
+    }
+    else
+    {
+        g_motor_boost_mode = (uint8)MOTOR_BOOST_MODE_OFF;
+        g_pitch_speed_boost_enable = 0u;
+    }
 }
 
 uint8 motor_get_pitch_speed_boost_enable(void)
 {
-    return g_pitch_speed_boost_enable;
+    return (g_motor_boost_mode != (uint8)MOTOR_BOOST_MODE_OFF) ? 1u : 0u;
 }
 
 void motor_set_pitch_speed_boost_params(float threshold_abs_deg, float k_counts_per_deg)
@@ -159,12 +186,46 @@ void motor_set_pitch_speed_boost_params(float threshold_abs_deg, float k_counts_
     if (k_counts_per_deg < 0.0f) k_counts_per_deg = 0.0f;
     g_pitch_speed_boost_threshold_deg = threshold_abs_deg;
     g_pitch_speed_boost_k_counts_per_deg = k_counts_per_deg;
+    // 兼容旧接口：历史上的 PIT_K 对应 DUTY 映射系数
+    g_motor_boost_k_duty = k_counts_per_deg;
 }
 
 void motor_get_pitch_speed_boost_params(float *threshold_abs_deg, float *k_counts_per_deg)
 {
     if (threshold_abs_deg) *threshold_abs_deg = g_pitch_speed_boost_threshold_deg;
-    if (k_counts_per_deg) *k_counts_per_deg = g_pitch_speed_boost_k_counts_per_deg;
+    if (k_counts_per_deg) *k_counts_per_deg = g_motor_boost_k_duty;
+}
+
+void motor_set_boost_mode(uint8 mode)
+{
+    if (mode > (uint8)MOTOR_BOOST_MODE_ACC) mode = (uint8)MOTOR_BOOST_MODE_OFF;
+    g_motor_boost_mode = mode;
+    g_pitch_speed_boost_enable = (mode != (uint8)MOTOR_BOOST_MODE_OFF) ? 1u : 0u;
+}
+
+uint8 motor_get_boost_mode(void)
+{
+    return g_motor_boost_mode;
+}
+
+void motor_set_boost_map_k(float duty_k, float pitch_k, float acc_k)
+{
+    if (duty_k < 0.0f) duty_k = 0.0f;
+    if (pitch_k < 0.0f) pitch_k = 0.0f;
+    if (acc_k < 0.0f) acc_k = 0.0f;
+
+    g_motor_boost_k_duty = duty_k;
+    g_motor_boost_k_pitch = pitch_k;
+    g_motor_boost_k_acc = acc_k;
+    // 兼容旧接口读取
+    g_pitch_speed_boost_k_counts_per_deg = duty_k;
+}
+
+void motor_get_boost_map_k(float *duty_k, float *pitch_k, float *acc_k)
+{
+    if (duty_k) *duty_k = g_motor_boost_k_duty;
+    if (pitch_k) *pitch_k = g_motor_boost_k_pitch;
+    if (acc_k) *acc_k = g_motor_boost_k_acc;
 }
 
 void motor_set_pitch_speed_boost_max_counts(float max_counts)
@@ -185,21 +246,32 @@ float motor_get_pitch_speed_boost_counts(void)
 
 static float motor_compute_pitch_speed_boost_counts(void)
 {
-    if (g_pitch_speed_boost_enable == 0u)
+    float input_abs = 0.0f;
+    float k = 0.0f;
+
+    if (g_motor_boost_mode == (uint8)MOTOR_BOOST_MODE_OFF)
     {
         return 0.0f;
     }
 
-    // 舵机0点按控制量 out=0 定义；这里直接使用姿态环输出量绝对值。
-    float abs_servo_out = fabsf(ips_show_pid_out);
-    float threshold = g_pitch_speed_boost_threshold_deg;
-    if (abs_servo_out <= threshold)
+    if (g_motor_boost_mode == (uint8)MOTOR_BOOST_MODE_DUTY)
     {
-        return 0.0f;
+        input_abs = fabsf(ips_show_pid_out);
+        k = g_motor_boost_k_duty;
+    }
+    else if (g_motor_boost_mode == (uint8)MOTOR_BOOST_MODE_PITCH)
+    {
+        input_abs = fabsf(show_pitch_deg);
+        k = g_motor_boost_k_pitch;
+    }
+    else
+    {
+        input_abs = fabsf(show_pitch_rate_dps_f);
+        k = g_motor_boost_k_acc;
     }
 
     {
-        float boost = g_pitch_speed_boost_k_counts_per_deg * (abs_servo_out - threshold);
+        float boost = k * input_abs;
         if (boost > g_pitch_speed_boost_max_counts) boost = g_pitch_speed_boost_max_counts;
         return boost;
     }

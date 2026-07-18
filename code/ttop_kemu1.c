@@ -16,16 +16,18 @@
 // 1m 对应编码器计数（可被菜单修改）
 volatile int g_ttop_kemu1_counts_per_meter = 18500;
 
-// 固定 5 段（可被菜单修改）
+// 固定 7 段（可被菜单修改）
 // 约定：
-// - seg[0], seg[1], seg[3], seg[4] 必须是直线段
-// - seg[2] 必须是转弯段
+// - seg[0], seg[1], seg[2], seg[4], seg[5], seg[6] 是直线段
+// - seg[3] 是转弯段
 volatile ttop_kemu1_seg_t g_ttop_kemu1_seg_table[TTOP_KEMU1_SEG_COUNT] =
 {
 	{ TTOP_KEMU1_SEG_STRAIGHT, 20.0f, 200, TTOP_EIGHT2_PROG_MAIN },
-	{ TTOP_KEMU1_SEG_STRAIGHT,  5.0f, 120, TTOP_EIGHT2_PROG_MAIN },
+	{ TTOP_KEMU1_SEG_STRAIGHT,  3.0f, 200, TTOP_EIGHT2_PROG_MAIN },
+	{ TTOP_KEMU1_SEG_STRAIGHT,  2.0f, 120, TTOP_EIGHT2_PROG_MAIN },
 	{ TTOP_KEMU1_SEG_TURN,      0.0f, 120, TTOP_EIGHT2_PROG_EX1  },
-	{ TTOP_KEMU1_SEG_STRAIGHT, 12.5f, 200, TTOP_EIGHT2_PROG_MAIN },
+	{ TTOP_KEMU1_SEG_STRAIGHT,  2.0f, 200, TTOP_EIGHT2_PROG_MAIN },
+	{ TTOP_KEMU1_SEG_STRAIGHT,  5.5f, 200, TTOP_EIGHT2_PROG_MAIN },
 	{ TTOP_KEMU1_SEG_STRAIGHT, 12.5f, 200, TTOP_EIGHT2_PROG_MAIN },
 };
 
@@ -50,15 +52,17 @@ static inline long long ttop_meter_to_count_local(float meters)
 
 static inline unsigned char ttop_is_straight_seg_local(unsigned char seg_idx)
 {
-	return (seg_idx == 0u || seg_idx == 1u || seg_idx == 3u || seg_idx == 4u) ? 1u : 0u;
+	return (seg_idx == 3u) ? 0u : 1u;  // 只有 seg[3] 是转弯
 }
 
 static inline unsigned char ttop_straight_slot_from_seg_local(unsigned char seg_idx)
 {
 	if (seg_idx == 0u) return 0u;
 	if (seg_idx == 1u) return 1u;
-	if (seg_idx == 3u) return 2u;
+	if (seg_idx == 2u) return 2u;
 	if (seg_idx == 4u) return 3u;
+	if (seg_idx == 5u) return 4u;
+	if (seg_idx == 6u) return 5u;
 	return 0xFFu;
 }
 
@@ -76,14 +80,14 @@ void ttop_kemu1_rebuild_targets(void)
 		}
 
 		accum += ttop_meter_to_count_local(g_ttop_kemu1_seg_table[i].meters);
-		if (slot < 4u)
+		if (slot < 6u)
 		{
 			s_kemu1.straight_end_counts[slot] = accum;
 			slot++;
 		}
 	}
 
-	while (slot < 4u)
+	while (slot < 6u)
 	{
 		s_kemu1.straight_end_counts[slot++] = accum;
 	}
@@ -127,7 +131,7 @@ unsigned char ttop_kemu1_task_5ms(void)
 	const volatile ttop_kemu1_seg_t *seg = &g_ttop_kemu1_seg_table[s_kemu1.seg_idx];
 	motor_set_target_counts_per_5ms(seg->speed_counts_5ms);
 
-	if (s_kemu1.seg_idx == 2u)
+	if (s_kemu1.seg_idx == 3u)
 	{
 		if (!s_kemu1.turn_inited)
 		{
@@ -160,7 +164,7 @@ unsigned char ttop_kemu1_task_5ms(void)
 
 	{
 		unsigned char slot = ttop_straight_slot_from_seg_local(s_kemu1.seg_idx);
-		if (slot < 4u)
+		if (slot < 6u)
 		{
 			if (s_kemu1.straight_counts_accum >= s_kemu1.straight_end_counts[slot])
 			{

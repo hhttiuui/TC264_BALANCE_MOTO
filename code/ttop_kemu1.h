@@ -19,7 +19,7 @@
 extern "C" {
 #endif
 
-#define TTOP_KEMU1_SEG_COUNT           (5u)
+#define TTOP_KEMU1_SEG_COUNT           (7u)
 
 typedef enum
 {
@@ -42,7 +42,7 @@ typedef struct
 	unsigned char seg_idx;
 	unsigned char turn_inited;
 	long long straight_counts_accum;
-	long long straight_end_counts[4];
+	long long straight_end_counts[6];
 	long long last_encoder_total;
 } ttop_kemu1_status_t;
 

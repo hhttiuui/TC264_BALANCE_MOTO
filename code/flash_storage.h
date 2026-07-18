@@ -27,34 +27,27 @@ extern "C" {
 // Flash 参数存储（DFLASH）
 //
 // 说明：
-// - 当前用于持久化两类数据：
-//   1) `s_pid_mode_cfg`（PID/AHRS/阻尼等配置表）
-//   2) `g_eight2_prog`（八字绕行段表）
+// - page 11 专用于 KM3 两段录制轨迹：slot 1=掉头，slot 2=S弯。
+// - 其余配置使用各自的独立 Flash 页。
 // - 采用“整页读写 + 头部 + CRC 校验”的方式，避免误读与掉电/未初始化问题。
 // - 写入前若检测到非擦除态，会执行擦除；请勿在高频循环中频繁调用 save。
 // ============================================================================
 
 // 加载：成功返回 1；失败（未初始化/校验失败）返回 0（保持 RAM 默认值不变）
 uint8 flash_storage_load_pid_mode_cfg(void);
-uint8 flash_storage_load_eight2_prog(void);
-uint8 flash_storage_load_eight2_prog_ex1(void);
-uint8 flash_storage_load_eight2_prog_ex2(void);
 
 // 保存：成功返回 1；失败返回 0
 uint8 flash_storage_save_pid_mode_cfg(void);
-uint8 flash_storage_save_eight2_prog(void);
-uint8 flash_storage_save_eight2_prog_ex1(void);
-uint8 flash_storage_save_eight2_prog_ex2(void);
+
+// KM3 录制页：slot 1=掉头（最多400点），slot 2=S弯（最多500点）
+uint8 flash_storage_save_kemu3_record(uint8 slot, const float *points, uint16 count);
+uint8 flash_storage_load_kemu3_record(uint8 slot, float *points, uint16 max_points, uint16 *out_count);
 
 // ============================================================================
-// Flash 参数存储 —— kemu1 固定 5 段配置
-//
-// 持久化内容：
-// - g_ttop_kemu1_counts_per_meter
-// - g_ttop_kemu1_seg_table[5]（每段 meters/speed/turn_prog_id）
+// Flash 参数存储 —— 统一段表（KM3 + KM1 + MAIN + EX1 + EX2）page 6
 // ============================================================================
-uint8 flash_storage_load_kemu1_cfg(void);
-uint8 flash_storage_save_kemu1_cfg(void);
+uint8 flash_storage_load_kemu_all(void);
+uint8 flash_storage_save_kemu_all(void);
 
 // ============================================================================
 // Flash 参数存储 —— 惯导航点表（INS Path）
@@ -80,11 +73,7 @@ uint8 flash_storage_save_ins_path(void);
 uint8 flash_storage_load_slope_cfg(void);
 uint8 flash_storage_save_slope_cfg(void);
 
-// ============================================================================
-// Flash 参数存储 —— KEMU3 段表（g_ttop_kemu3_seg_table）
-// ============================================================================
-uint8 flash_storage_load_kemu3_seg(void);
-uint8 flash_storage_save_kemu3_seg(void);
+// old KMU3 seg APIs removed — merged into flash_storage_save/load_kemu_all
 
 // ============================================================================
 // Flash 参数存储 —— RC Yaw 录制轨迹（50ms采样数组）
@@ -94,8 +83,8 @@ uint8 flash_storage_save_kemu3_seg(void);
 // - yaw_points 为外部提供的 float 数组，count 为有效点数。
 // - load 时按 max_points 做上限保护，实际点数通过 out_count 返回。
 // ============================================================================
-uint8 flash_storage_save_rc_yaw_record(const float *yaw_points, uint16 count);
-uint8 flash_storage_load_rc_yaw_record(float *yaw_points, uint16 max_points, uint16 *out_count);
+uint8 flash_storage_save_rc_yaw_record(const float *yaw_points, uint16 count, uint8 slot);
+uint8 flash_storage_load_rc_yaw_record(float *yaw_points, uint16 max_points, uint16 *out_count, uint8 slot);
 
 // ============================================================================
 // Flash 参数存储 —— 杂项配置（MISC）
@@ -131,7 +120,7 @@ typedef struct
     float  kemu3_yaw_ki_path;              // g_kemu3_yaw_ki_path
     int    kemu3_counts_per_meter;         // g_ttop_kemu3_counts_per_meter
 
-    // ---- MOTOR_PID（6 项） ----
+    // ---- MOTOR_PID ----
     float  motor_kp;
     float  motor_ki;
     float  motor_kd;
@@ -140,9 +129,17 @@ typedef struct
     float  motor_pitch_boost_max;
     uint8  motor_pitch_boost_enable;
     uint8  _pad2[3];
+    uint8  motor_boost_mode;
+    uint8  _pad3[3];
+    float  motor_boost_k_duty;
+    float  motor_boost_k_pitch;
+    float  motor_boost_k_acc;
+
+    // ---- 舵机零点校准 ----
+    float  servo_zero_offset_deg;          // g_servo_zero_offset_deg
 
     // ---- 预留扩展区（后续新增杂项直接使用此区域） ----
-    uint8  reserved[128];
+    uint8  reserved[124];
 
 } flash_misc_cfg_t;
 

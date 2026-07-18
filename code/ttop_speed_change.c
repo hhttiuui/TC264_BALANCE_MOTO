@@ -47,6 +47,14 @@
 #define TTOP_SPEED_CHANGE_RATE_STEP_MAX      (0.20f)
 #endif
 
+#ifndef TTOP_SPEED_CHANGE_YAW_STEP_MIN
+#define TTOP_SPEED_CHANGE_YAW_STEP_MIN      (0.005f)
+#endif
+
+#ifndef TTOP_SPEED_CHANGE_YAW_STEP_MAX
+#define TTOP_SPEED_CHANGE_YAW_STEP_MAX      (0.20f)
+#endif
+
 // 1/v^2 映射的最小速度保护，避免 v 过小导致过大增益。
 #ifndef TTOP_SPEED_CHANGE_INV_SQ_VMIN
 #define TTOP_SPEED_CHANGE_INV_SQ_VMIN    (30.0f)
@@ -66,20 +74,22 @@ typedef struct
 	float angle_kp_tgt;
 	float rate_kp_now;
 	float rate_kp_tgt;
+	float yaw_kp_now;
+	float yaw_kp_tgt;
 } ttop_speed_change_ctrl_t;
 
-static ttop_speed_change_ctrl_t s_spd = {0u, PID_MODE_CASCADE, PID_MODE_CASCADE_EX2, PID_MODE_CASCADE_EX1, 0.0f, 0.0f, 0.0f, 0u, 0.0f, 0.0f, 0.0f, 0.0f};
+static ttop_speed_change_ctrl_t s_spd = {0u, PID_MODE_CASCADE, PID_MODE_CASCADE_EX2, PID_MODE_CASCADE_EX1, 0.0f, 0.0f, 0.0f, 0u, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
 
 // 拟合方式选择（可被菜单修改）：0=1/v^2 映射，1=线性 y=kx+b
 volatile uint8 g_ttop_speed_change_fit_mode = 2u;
 
-// 速度低通滤波系数（0~1，可被菜单修改）
-volatile float g_ttop_speed_change_lpf_alpha = (float)TTOP_SPEED_CHANGE_LPF_ALPHA;
+// 速度低通滤波系数（0~1，可被菜单修改，0=不过滤）
+volatile float g_ttop_speed_change_lpf_alpha = 0.0f;
 
 // 速度预测增益（0~2）：speed_pred = speed_filt + gain * dv_filt
 volatile float g_ttop_speed_change_pred_gain = 5.0f;
 
-#define TTOP_SPEED_CHANGE_POINT_COUNT (7u)
+#define TTOP_SPEED_CHANGE_POINT_COUNT (11u)
 static const pid_mode_t s_spd_point_modes[TTOP_SPEED_CHANGE_POINT_COUNT] =
 {
 	PID_MODE_CASCADE_EX1,
@@ -89,6 +99,10 @@ static const pid_mode_t s_spd_point_modes[TTOP_SPEED_CHANGE_POINT_COUNT] =
 	PID_MODE_CASCADE_EX5,
 	PID_MODE_CASCADE_EX6,
 	PID_MODE_CASCADE_EX7,
+	PID_MODE_CASCADE_EX8,
+	PID_MODE_CASCADE_EX9,
+	PID_MODE_CASCADE_EX10,
+	PID_MODE_CASCADE_EX11,
 };
 
 static inline float ttop_absf_local(float x)
@@ -156,6 +170,8 @@ void ttop_speed_change_init(pid_mode_t high_mode, pid_mode_t low_mode)
 	s_spd.angle_kp_tgt = cfg_low->angle.kp;
 	s_spd.rate_kp_now = cfg_low->rate.kp;
 	s_spd.rate_kp_tgt = cfg_low->rate.kp;
+	s_spd.yaw_kp_now = cfg_low->yaw.kp;
+	s_spd.yaw_kp_tgt = cfg_low->yaw.kp;
 
 	// 使用低速模式作为动态链路的基础参数（限幅/ki/kd/yaw 等）。
 	PID_HOT_SWITCH_BY_MODE(s_spd.mode_low);
@@ -192,11 +208,13 @@ void ttop_speed_change_task_5ms(void)
 
 	float angle_slope_abs = 0.0f;
 	float rate_slope_abs = 0.0f;
+	float yaw_slope_abs = 0.0f;
 	const float dv_anchor = (v_high > v_low + 1e-6f) ? (v_high - v_low) : 1.0f;
 	if (dv_anchor > 1e-6f)
 	{
 		angle_slope_abs = ttop_absf_local(cfg_high->angle.kp - cfg_low->angle.kp) / dv_anchor;
 		rate_slope_abs = ttop_absf_local(cfg_high->rate.kp - cfg_low->rate.kp) / dv_anchor;
+		yaw_slope_abs = ttop_absf_local(cfg_high->yaw.kp - cfg_low->yaw.kp) / dv_anchor;
 	}
 
 	// 以 EX1/EX2 的速度点作为严格锚点：
@@ -250,6 +268,21 @@ void ttop_speed_change_task_5ms(void)
 				if (alpha_rate < 0.0f) alpha_rate = 0.0f;
 				s_spd.rate_kp_tgt = ttop_lerpf_local(cfg_low->rate.kp, cfg_high->rate.kp, alpha_rate);
 			}
+
+			// yaw_kp：同 angle/rate 按 1/v^2 外推
+			if (s_spd.speed_pred <= v_low)
+			{
+				s_spd.yaw_kp_tgt = cfg_low->yaw.kp;
+			}
+			else
+			{
+				float inv_eval_yaw = ttop_inv_sq_local(s_spd.speed_pred);
+				float alpha_yaw = 0.0f;
+				if (ttop_absf_local(den) > 1e-12f)
+					alpha_yaw = (inv_low - inv_eval_yaw) / den;
+				if (alpha_yaw < 0.0f) alpha_yaw = 0.0f;
+				s_spd.yaw_kp_tgt = ttop_lerpf_local(cfg_low->yaw.kp, cfg_high->yaw.kp, alpha_yaw);
+			}
 		}
 		else if (g_ttop_speed_change_fit_mode == 1u)
 		{
@@ -264,6 +297,19 @@ void ttop_speed_change_task_5ms(void)
 				angle_b = cfg_low->angle.kp - angle_k * v_low;
 				rate_k = (cfg_high->rate.kp - cfg_low->rate.kp) / dv_anchor;
 				rate_b = cfg_low->rate.kp - rate_k * v_low;
+			}
+
+			{
+				float yaw_k = 0.0f, yaw_b = cfg_low->yaw.kp;
+				if (dv_anchor > 1e-6f)
+				{
+					yaw_k = (cfg_high->yaw.kp - cfg_low->yaw.kp) / dv_anchor;
+					yaw_b = cfg_low->yaw.kp - yaw_k * v_low;
+				}
+				if (s_spd.speed_pred <= v_low)
+					s_spd.yaw_kp_tgt = cfg_low->yaw.kp;
+				else
+					s_spd.yaw_kp_tgt = yaw_k * s_spd.speed_pred + yaw_b;
 			}
 
 			if (s_spd.speed_pred <= v_low)
@@ -349,17 +395,19 @@ void ttop_speed_change_task_5ms(void)
 
 				s_spd.angle_kp_tgt = ttop_lerpf_local(cfgs[seg]->angle.kp, cfgs[seg + 1u]->angle.kp, t);
 				s_spd.rate_kp_tgt = ttop_lerpf_local(cfgs[seg]->rate.kp, cfgs[seg + 1u]->rate.kp, t);
-
+				s_spd.yaw_kp_tgt = ttop_lerpf_local(cfgs[seg]->yaw.kp, cfgs[seg + 1u]->yaw.kp, t);
 				if (dv > 1e-6f)
 				{
 					angle_slope_abs = ttop_absf_local(cfgs[seg + 1u]->angle.kp - cfgs[seg]->angle.kp) / dv;
 					rate_slope_abs = ttop_absf_local(cfgs[seg + 1u]->rate.kp - cfgs[seg]->rate.kp) / dv;
+					yaw_slope_abs = ttop_absf_local(cfgs[seg + 1u]->yaw.kp - cfgs[seg]->yaw.kp) / dv;
 				}
 			}
 		}
 
 		if (s_spd.angle_kp_tgt < 0.0f) s_spd.angle_kp_tgt = 0.0f;
 		if (s_spd.rate_kp_tgt < 0.0f) s_spd.rate_kp_tgt = 0.0f;
+		if (s_spd.yaw_kp_tgt < 0.0f) s_spd.yaw_kp_tgt = 0.0f;
 	}
 
 	{
@@ -371,14 +419,18 @@ void ttop_speed_change_task_5ms(void)
 		float rate_step = ttop_clampf_local(rate_slope_abs * dv_eff,
 			(float)TTOP_SPEED_CHANGE_RATE_STEP_MIN,
 			(float)TTOP_SPEED_CHANGE_RATE_STEP_MAX);
+		float yaw_step = ttop_clampf_local(yaw_slope_abs * dv_eff,
+			(float)TTOP_SPEED_CHANGE_YAW_STEP_MIN,
+			(float)TTOP_SPEED_CHANGE_YAW_STEP_MAX);
 
 		s_spd.angle_kp_now = ttop_slew_toward_local(s_spd.angle_kp_now, s_spd.angle_kp_tgt, angle_step);
 		s_spd.rate_kp_now = ttop_slew_toward_local(s_spd.rate_kp_now, s_spd.rate_kp_tgt, rate_step);
+		s_spd.yaw_kp_now = ttop_slew_toward_local(s_spd.yaw_kp_now, s_spd.yaw_kp_tgt, yaw_step);
 		s_spd.speed_abs_filt_prev = s_spd.speed_abs_filt;
 	}
 
 	// 插值仅在 speed_change 模块内完成，common_flie 仅负责接收参数并执行调度。
-	pid_dynamic_cascade_set_kp(s_spd.angle_kp_now, s_spd.rate_kp_now);
+	pid_dynamic_cascade_set_kp(s_spd.angle_kp_now, s_spd.rate_kp_now, s_spd.yaw_kp_now);
 
 	// 动态 PID 专用处理（固定 cascade 链路）。
 	pid_timer_handler_dynamic_cascade(s_spd.mode_low);
@@ -398,3 +450,6 @@ float ttop_speed_change_get_angle_kp(void){return s_spd.angle_kp_now;}
 
 //返回当前动态插值后的 rate_kp（用于调试显示）
 float ttop_speed_change_get_rate_kp(void){return s_spd.rate_kp_now;}
+
+//返回当前动态插值后的 yaw_kp（用于调试显示）
+float ttop_speed_change_get_yaw_kp(void){return s_spd.yaw_kp_now;}
