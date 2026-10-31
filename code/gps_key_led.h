@@ -16,7 +16,8 @@
 #define LED2                    (P20_8)
 #define LED3                    (P21_5)
 #define LED4                    (P21_4)
-// 按键定义
+// 按键定义：实际引脚在 Key.h（P13_0 / P13_3 / P13_1 / P13_2）。
+// 下面这几行是旧板子的引脚，已废弃，留作对照。
 // #define KEY1                    (P20_6)
 // #define KEY2                    (P20_7)
 // #define KEY3                    (P11_2)

@@ -15,11 +15,11 @@
  *  - 里程标定：  ENCODER_COUNTS_PER_M = 18813（counts/m）
  *  - 航向角：    show_yaw_deg（度，由 AHRS Mahony 解算，imu_task_handler_2ms 中更新）
  *
- *  调用时序（ISR 中按 period_count 分时）：
- *    slot 0 (0ms)  → encoder_tim5_demo_update_5ms()  ← 更新编码器增量
- *    slot 2 (2ms)  → imu_task_handler_2ms()           ← 更新 show_yaw_deg
- *    slot 3 (3ms)  → ttop_pid_task_5ms()              ← 在此调用 ins_dr_update_5ms()
- *  因此本函数执行时，编码器增量和 yaw 角都是当前周期的最新值。
+ *  调用位置：
+ *    在 ins_path_record_task_5ms() / ins_path_follow_task_5ms() 里调用
+ *    （即 MODE9 示教录制、MODE10 Pure Pursuit 跟踪两个模式）。
+ *    此时编码器任务（5ms）和姿态解算（1ms）都已完成本周期的更新。
+ *    注：历史上曾在 ttop_pid_task_5ms() 中调用，该函数已不存在。
  */
 
 #include "zf_common_headfile.h"

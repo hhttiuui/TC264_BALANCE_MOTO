@@ -280,9 +280,9 @@ static void load_saved_route_points(void)
 void ttop_funtion_init(void)
 {
 	pit_init(CCU61_CH0,1000);  //舵机pid+编码器的定时器
-    pit_init(CCU60_CH1,2000);   // 2 ms 定时器，用于驱动姿态解算
+    pit_init(CCU60_CH1,2000);   // 2ms 定时器：中断体 cc60_pit_ch1_isr 当前是空的，未承担实际任务
     pwm_init(PWM_CH1, 300, 0);   //pwm
-    //uart_init(UART_0, 460800, UART0_TX_P14_0, UART0_RX_P14_1);// UART0->现用于测试，后面会用于gps接收
+    // GNSS 走 gnss_init(TAU1201)（见 cpu0_main.c），UART0 未启用
 
     ips200_set_dir(IPS200_PORTAIT);//屏幕初始化
     ips200_set_color(RGB565_BLACK, RGB565_WHITE);

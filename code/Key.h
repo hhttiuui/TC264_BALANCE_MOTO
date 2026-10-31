@@ -15,7 +15,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-#define key1            (P13_0)//P11_3  P11_2  P20_7  P20_6
+#define key1            (P13_0)
 #define key2            (P13_3)
 #define key3            (P13_1)
 #define key4            (P13_2)

@@ -19,8 +19,10 @@ extern "C" {
 
 #define SMALL_DRIVER_UART                       (UART_2        )
 #define SMALL_DRIVER_BAUDRATE                   (460800        )
-#define SMALL_DRIVER_RX                         (UART2_TX_P10_5)//UART2_TX_P10_5,UART3_TX_P15_6
-#define SMALL_DRIVER_TX                         (UART2_RX_P10_6)//UART2_RX_P10_6,UART3_RX_P15_7
+// 注意：下面两个宏名和引脚方向是反的——叫 RX 的其实是 TX 脚，叫 TX 的是 RX 脚。
+// 沿用历史命名，改宏名会影响其他地方，所以只在这里注明。
+#define SMALL_DRIVER_RX                         (UART2_TX_P10_5)// 实为 TX 脚 P10_5（备选 UART3_TX_P15_6）
+#define SMALL_DRIVER_TX                         (UART2_RX_P10_6)// 实为 RX 脚 P10_6（备选 UART3_RX_P15_7）
 
 typedef struct
 {

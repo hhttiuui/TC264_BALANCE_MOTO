@@ -30,12 +30,12 @@ extern "C" {
 
 // ============================ 封装主循环任务（把 if 块体一起搬过来） ============================
 // 5ms 编码器/电机/按键等任务：内部会判断 yaw_delay_done / stop / encoder_flag
-// 婊¤冻鏉′欢鏃惰嚜鍔ㄦ竻 encoder_flag 骞舵墽琛屽師鏉ョ殑 if{} 鍐呭
+// 满足条件时自动清 encoder_flag 并执行原来的 if{} 内容
 void ttop_encoder_task_5ms(void);
 
-// 5ms/10ms PID 任务：内部会判断 yaw_delay_done / stop / pid_flag
-// 婊¤冻鏉′欢鏃惰嚜鍔ㄦ竻 pid_flag 骞舵墽琛屽師鏉ョ殑 if{} 鍐呭
-void ttop_pid_task_5ms(void);
+// 注意：ttop_pid_task_5ms() 全工程没有实现，PID 已迁到
+// common_flie.c 的 pid_timer_handler_multirate_2ms()（2/4/8ms 多速率）。
+// void ttop_pid_task_5ms(void);   // 历史残留声明，无定义，勿调用
 
 void ttop_funtion_new(void);
 

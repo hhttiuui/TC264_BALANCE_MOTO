@@ -70,8 +70,9 @@ void ins_dr_reset(void);
  *    3) 将 ds 分解到 X/Y 轴并累加
  *    4) 更新里程表和瞬时速度
  *  调用位置：
- *    在 ttop_pid_task_5ms() 中、PID 计算之前调用。
- *    此时编码器（slot 0）和 IMU（slot 2）已完成更新。
+ *    在 ins_path_record_task_5ms() / ins_path_follow_task_5ms() 里调用，
+ *    即 MODE9（示教录制）和 MODE10（Pure Pursuit 跟踪）两个模式。
+ *    注：历史上曾在 ttop_pid_task_5ms() 中调用，该函数已不存在。
  * ================================================================ */
 void ins_dr_update_5ms(void);
 

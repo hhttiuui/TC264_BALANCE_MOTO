@@ -46,51 +46,37 @@ int core0_main(void)
 
 #pragma section all restore
 // ********************************************************
-//现在的任务触发：姿态解算->2ms中断触发
-//               编码器+按键+pid+按键切换后的初始化 -> while里5ms等待触发
-
-/* 
-现在的调控方式：
-
-
-
-
-用1ms定时器，以5ms为周期，分别触发：
-0ms ~ 1ms -> 编码器更新
-1ms ~ 2ms -> 按键
-2ms ~ 3ms -> 姿态解算
-3ms ~ 4ms -> pid计算
-4ms ~ 5ms -> 留空
-鑿滃崟鎿嶄綔鏀惧湪涓诲惊鐜腑
-
-
-
-已使用引脚：
-舵机 -> 33_9
-
-UART_2_TX -> P10_5（UART2_TX_P10_5）
-UART_2_RX -> P10_6（UART2_RX_P10_6）
-UART_3_TX -> P15_6（注意：宏名写的是 SMALL_DRIVER_RX (UART3_TX_P15_6)）
-UART_3_RX -> P15_7（注意：宏名写的是 SMALL_DRIVER_TX (UART3_RX_P15_7)）
-
-KEY1 -> P11_3
-KEY2 -> P11_2
-KEY3 -> P20_7
-
-LED1 -> P20_9
-LED2 -> P20_8
-LED3 -> P21_5
-LED4 -> P21_4
-
-编码器 A 相 / CH1 -> P33_7（TIM2_ENCODER_CH1_P33_7）
-编码器 B 相 / CH2 -> P33_6（TIM2_ENCODER_CH2_P33_6）
-
-
-函数耗时：
-ttop_encoder_task_5ms();//编码器-> 135.26us
-ttop_key_task_5ms();    //按键-> 2.06us
-imu_task_handler_2ms(); //姿态解算-> 25.84us
-ttop_pid_task_5ms();    //pid计算-> 19.62us
-
-
-*/
+// 运行调度说明（以 user/isr.c 为准，旧注释已作废）
+//
+// core0_main() 的主循环只做三件事，全是非实时任务：
+//     Menu_Select()      菜单状态机
+//     User_Interface()   IPS200 刷新
+//     gnss_data_parse()  GNSS 解析（中断里也会调一次）
+//
+// 所有实时任务都在 user/isr.c 的 cc61_pit_ch0_isr 里，
+// 由 pit_init(CCU61_CH0, 1000) 以 1ms 触发，内部分频：
+//     1ms  -> imu_task_handler_2ms()            读 IMU + Mahony 解算（dt=0.001）
+//     2ms  -> pid_timer_handler_multirate_2ms() 内部再分 2/4/8ms 三层 PID
+//     5ms  -> Key_Sample()                      按键采样
+//     5ms  -> ttop_funtion_new()                按 funtion_kemu 分派模式任务
+//     5ms  -> ttop_encoder_task_5ms()           编码器 + 坡度补偿 + 电机速度环
+//     20ms -> gps_nav_task_100ms()              GNSS 导航（名字写 100ms，实际 20ms）
+//     事件 -> gnss_data_parse()                 gnss_flag 置位时
+//
+// 上电后约 2 秒（enable_count > 2000）才开始跑任务，给 IMU/GNSS 留稳定时间。
+// pit_init(CCU60_CH1, 2000) 那个 2ms 定时器虽然初始化了，但中断体是空的。
+//
+// 已使用引脚（以宏定义为准，不要以旧注释为准）：
+//   舵机        P33_9              (ATOM0_CH1, 300Hz)
+//   编码器      P33_7 / P33_6      (TIM2 正交)
+//   小驱动板    UART2, 460800      (TX 脚 P10_5 / RX 脚 P10_6，宏名与方向相反)
+//   按键 KEY1~4 P13_0 / P13_3 / P13_1 / P13_2
+//   LED1~4      P20_9 / P20_8 / P21_5 / P21_4
+//   蜂鸣器      P33_10
+//
+// 测试脚（任务入口/出口各翻转一次，HIGH 宽度即任务耗时）：
+//   P21_2 <- ttop_encoder_task_5ms()            独占
+//   P22_1 <- imu_task_handler_2ms()             独占
+//   P22_2 <- pid_timer_handler_multirate_2ms() 与 ttop_funtion_new() 共用
+//   P21_3 / P22_0 / P22_3  已初始化但没有任何地方翻转
+// ********************************************************
