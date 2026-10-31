@@ -53,8 +53,9 @@ void ttop_funtion_mode_once_apply(void)
 		ttop_rc_control_init();
 		PID_INIT_BY_MODE(PID_MODE_DAMPED_TWO);
 	}
-	else if (funtion_kemu == 4u)// MODE4：直线速度45
-	{		
+	else if (funtion_kemu == 4u)// MODE4：与 MODE3 相同功能，仅 PID 参数不同（DAMPED_THREE，速度45）
+	{
+		ttop_rc_control_init();		
 		PID_INIT_BY_MODE(PID_MODE_DAMPED_THREE);
 	}
 	else if (funtion_kemu == 5u)// MODE5：直线速度200+转弯
@@ -145,8 +146,9 @@ void ttop_funtion_new(void)
 		ttop_speed_change_task_5ms();
 
 	}
-	// MODE3 (KM2)：遥控器控制 + 录制 + 回放
-	else if(funtion_kemu == 3)
+	// MODE3 / MODE4 (KM2)：遥控器控制 + 录制 + 回放
+	// 两者功能完全相同，仅 PID 参数不同（MODE3=DAMPED_TWO，MODE4=DAMPED_THREE）
+	else if(funtion_kemu == 3 || funtion_kemu == 4)
 	{
 		uint8 replay_was = ttop_rc_yaw_replay_is_active();
 
@@ -161,8 +163,6 @@ void ttop_funtion_new(void)
 			motor_set_target_counts_per_5ms(0);
 		}
 	}
-	// MODE4：直线速度45
-	else if(funtion_kemu == 4){}
 	// MODE5 (KM1)：7 段路径，跑完自动停
 	else if(funtion_kemu == 5)
 	{

@@ -1758,8 +1758,8 @@ void Menu_StartAll(void)
         gps_nav_stop();
     }
 
-    // MODE3: START 时锁存配置开关，并执行对应 start 动作
-    if (funtion_kemu == 3u)
+    // MODE3/MODE4: START 时锁存配置开关，并执行对应 start 动作
+    if (funtion_kemu == 3u || funtion_kemu == 4u)
     {
         s_mode3_run_yaw_only = s_mode3_cfg_yaw_only;
         s_mode3_run_record = s_mode3_cfg_record;
