@@ -14,6 +14,8 @@ IMU660RX ──SPI──▶ Mahony AHRS (1ms) ──▶ roll / pitch / yaw
                                         舵机 P33_9 (300Hz)
 ```
 
+![平衡摩托整车装配状态](docs/images/moto-assembly.jpg)
+
 ## 目录结构
 
 ```
@@ -113,6 +115,8 @@ yaw 外环有个**俯仰门控**：`|pitch| ≤ 30°` 才更新 yaw 目标，
 
 PID 参数按 **16 组表**（`PID_MODE_CFG_COUNT`）存在 Flash 里，菜单里切换，
 上电由 `flash_storage_load_pid_mode_cfg()` 恢复。
+
+![IPS200 参数页：三层 PID 的实际参数（屏底写着 MADE BY -> hhttiuui）](docs/images/oled-pid-menu.jpg)
 
 ## 12 种赛事模式
 
